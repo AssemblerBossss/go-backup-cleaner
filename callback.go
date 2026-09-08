@@ -73,7 +73,9 @@ const (
 	ErrorTypeDir    ErrorType = "dir"
 )
 
-// callSafe safely calls a callback function if it's not nil
+// callSafe safely calls a callback function if it's not nil.
+// Generic over the info payload so every OnXxx callback in Callbacks can
+// share one nil-check instead of repeating "if cb != nil { cb(x) }" everywhere.
 func callSafe[T any](fn func(T), info T) {
 	if fn != nil {
 		fn(info)

@@ -129,7 +129,10 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 			select {
 			case taskChan <- scanTask{path: fullPath}:
 			default:
-				// If channel is full, process synchronously
+				// Task queue (cap 100) is saturated: recurse synchronously on this
+				// worker's own goroutine instead of blocking on send - avoids a
+				// deadlock if every worker ends up waiting to enqueue at once,
+				// and keeps deep/wide trees flowing without unbounded goroutines.
 				taskWg.Done()
 				if err := s.processPath(fullPath, taskChan, taskWg); err != nil {
 					return err
@@ -150,7 +153,10 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 	return nil
 }
 
-// addFile adds a file to the appropriate time slot
+// addFile adds a file to the appropriate time slot.
+// Files are never held in one giant slice - they're bucketed by
+// Truncate()-rounded mtime immediately, which is what keeps memory use
+// bounded on trees with millions of files (see TimeWindow in config.go).
 func (s *scanner) addFile(fi fileInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -201,7 +207,10 @@ func (s *scanner) getTotalFiles() int {
 
 // sortTimeSlots sorts time slots by time (oldest first)
 func sortTimeSlots(slots []*timeSlot) {
-	// Simple bubble sort for clarity (can be optimized if needed)
+	// Simple bubble sort for clarity (can be optimized if needed).
+	// O(n^2): fine while slot count stays small (TimeWindow default 5m over
+	// a bounded retention span), but if this ever gets driven by a much
+	// finer TimeWindow or a multi-year backup tree, swap for sort.Slice.
 	n := len(slots)
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-i-1; j++ {

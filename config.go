@@ -2,62 +2,87 @@ package gobackupcleaner
 
 import (
 	"runtime"
+	"strings"
 	"time"
 )
 
 // CleaningConfig represents the configuration for cleaning operations
 type CleaningConfig struct {
-	// Capacity specifications (at least one required)
-	// MinFreeSpace is the recommended primary option for most use cases.
-	MinFreeSpace    *int64   // Minimum free space in bytes (recommended)
-	MaxUsagePercent *float64 // Maximum disk usage percentage (0-100)
-	MaxSize         *int64   // Maximum size in bytes (use when disk info is unavailable)
+	// Параметры ёмкости (требуется хотя бы один)
+	// MinFreeSpace — рекомендуемый основной параметр для большинства случаев использования.
+	MinFreeSpace    *int64   // Минимальное свободное место в байтах (рекомендуется)
+	MaxUsagePercent *float64 // Максимальный процент использования диска (0-100)
+	MaxSize         *int64   // Максимальный размер в байтах (используйте, если информация о диске недоступна)
 
-	// Optional settings
-	TimeWindow      time.Duration // Time interval for file aggregation (default: 5 minutes)
-	RemoveEmptyDirs bool          // Whether to remove empty directories (default: true)
-	
-	// Concurrency settings
-	// Concurrency specifies the desired level of concurrency.
-	// If 0, defaults to runtime.NumCPU().
+	// Дополнительные настройки
+	TimeWindow      time.Duration // Интервал времени для агрегации файлов (по умолчанию: 5 минут)
+	RemoveEmptyDirs bool          // Удалять ли пустые каталоги (по умолчанию: true)
+
+	// Cписок расширений файлов, которые НИКОГДА не учитываются при сканировании и никогда не удаляются
+	ExcludeExtensions []string
+
+	// excludeExtSet — нормализованный набор расширений для O(1)-проверки.
+	// Строится один раз в setDefaults(), чтобы не гонять по срезу
+	// ExcludeExtensions на каждый файл при сканировании миллионов файлов.
+	excludeExtSet map[string]struct{}
+
+	// Настройки параллелизма
+	// Concurrency задаёт желаемый уровень параллелизма.
+	// Если значение 0, по умолчанию используется runtime.NumCPU().
 	Concurrency int
-	
-	// MaxConcurrency limits the maximum level of concurrency.
-	// Defaults to 4, as benchmarks show diminishing returns beyond this value.
-	// The actual concurrency will be min(Concurrency, MaxConcurrency).
+
+	// MaxConcurrency ограничивает максимальный уровень параллелизма.
+	// По умолчанию равен 4, так как тесты производительности показывают убывающую отдачу при превышении этого значения.
+	// Фактический уровень параллелизма будет равен min(Concurrency, MaxConcurrency).
 	MaxConcurrency int
 
 	// Callbacks
 	Callbacks Callbacks
 
-	// Dependency injection
-	DiskInfo DiskInfoProvider // If nil, uses default implementation
+	// Внедрение зависимостей
+	// DiskInfo позволяет подставить в тестах поддельный источник DiskUsage/BlockSize
+	// вместо обращения к реальной файловой системе (см. DiskInfoProvider в disk.go).
+	DiskInfo DiskInfoProvider // Если nil, используется реализация по умолчанию
 }
 
-// setDefaults sets default values for the configuration
+// setDefaults устанавливает значения по умолчанию для конфигурации
 func (c *CleaningConfig) setDefaults() {
 	if c.TimeWindow == 0 {
 		c.TimeWindow = 5 * time.Minute
 	}
-	
-	// Set default concurrency to CPU count if not specified
+
+	if len(c.ExcludeExtensions) > 0 {
+		c.excludeExtSet = make(map[string]struct{})
+		for _, ext := range c.ExcludeExtensions {
+			ext = strings.ToLower(strings.TrimSpace(ext))
+			if ext == "" {
+				continue
+			}
+			if !strings.HasPrefix(ext, ".") {
+				ext = "." + ext
+			}
+			c.excludeExtSet[ext] = struct{}{}
+		}
+	}
+
+	// Устанавливаем параллелизм по умолчанию равным количеству CPU, если не указано
 	if c.Concurrency == 0 {
 		c.Concurrency = runtime.NumCPU()
 	}
-	
-	// Set default max concurrency
+
+	// Устанавливаем максимальный параллелизм по умолчанию
 	if c.MaxConcurrency == 0 {
 		c.MaxConcurrency = 4
 	}
-	
+
 	if c.DiskInfo == nil {
 		c.DiskInfo = &DefaultDiskInfoProvider{}
 	}
-	// RemoveEmptyDirs defaults to true, but we can't override explicit false
-	// So we don't set it here - let the caller decide
+	// RemoveEmptyDirs по умолчанию true, но мы не можем переопределить явное false
+	// поэтому не устанавливаем его здесь — пусть решает вызывающий код
 }
 
-// ActualWorkerCount returns the actual number of workers that will be used
+// ActualWorkerCount возвращает фактическое количество рабочих процессов, которое будет использовано
 func (c *CleaningConfig) ActualWorkerCount() int {
 	workers := c.Concurrency
 	if workers > c.MaxConcurrency {
@@ -66,7 +91,7 @@ func (c *CleaningConfig) ActualWorkerCount() int {
 	return workers
 }
 
-// validate checks if the configuration is valid
+// validate проверяет, является ли конфигурация допустимой
 func (c *CleaningConfig) validate() error {
 	if c.MinFreeSpace == nil && c.MaxUsagePercent == nil && c.MaxSize == nil {
 		return ErrNoCapacitySpecified

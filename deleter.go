@@ -24,7 +24,7 @@ func (d *deletedDirs) add(dir string) {
 func (d *deletedDirs) toSlice() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	dirs := make([]string, 0, len(d.dirs))
 	for dir := range d.dirs {
 		dirs = append(dirs, dir)
@@ -150,10 +150,14 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 			}
 		}
 	} else if info.Mode().IsRegular() && info.ModTime().Before(threshold) {
-		// Delete file if it's older than threshold
+		// Delete file if it's older than threshold.
+		// This is a fresh Lstat-based walk, independent of the scanner's
+		// timeSlot map - the deleter never holds the file list from phase 1
+		// in memory, it just re-visits the tree and re-checks each file's
+		// own ModTime against the single threshold computed in cleaner.go.
 		size := info.Size()
 		blockSize := calculateBlockSize(size, d.blockSize)
-		
+
 		if err := os.Remove(path); err != nil {
 			return err
 		}
@@ -206,7 +210,11 @@ func (d *deleter) deleteEmptyDirs() (int, error) {
 	return deletedCount, nil
 }
 
-// deleteEmptyDirRecursive recursively deletes empty directories
+// deleteEmptyDirRecursive recursively deletes empty directories.
+// Starts only from directories that actually had a file deleted from them
+// (see deletedDirs), then walks upward: removing a dir can make its parent
+// empty too, so each successful removal retries one level up until it hits
+// a non-empty (or root/"." ) directory.
 func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
 	// Check if directory is empty
 	entries, err := os.ReadDir(dir)
@@ -225,7 +233,7 @@ func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
 		}
 
 		(*deletedCount)++
-		
+
 		// Call callback
 		callSafe(d.config.Callbacks.OnDirDeleted, DirDeletedInfo{
 			Path: dir,

@@ -94,7 +94,7 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 	var threshold time.Time
 	var estimatedFiles int
 	var estimatedSize int64
-	
+
 	if targetSize == -1 && config.MaxSize != nil {
 		// Special case: delete until total size is under MaxSize
 		threshold, estimatedFiles, estimatedSize = calculateThresholdForMaxSize(timeSlots, *config.MaxSize)
@@ -114,7 +114,7 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 
 	// Phase 2: Delete files
 	deleteStartTime := time.Now()
-	
+
 	// Call OnDeleteStart callback
 	callSafe(config.Callbacks.OnDeleteStart, DeleteStartInfo{
 		EstimatedFiles: estimatedFiles,
@@ -157,7 +157,11 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 	}, nil
 }
 
-// calculateTargetSize calculates how much space needs to be freed
+// calculateTargetSize calculates how much space needs to be freed.
+// Each constraint (MaxSize / MaxUsagePercent / MinFreeSpace) is evaluated
+// independently, and the LARGEST resulting size wins (not the sum): since
+// Used/Free/UsedPercent all move together as files are deleted, satisfying
+// the strictest constraint automatically satisfies the looser ones too.
 func calculateTargetSize(usage *DiskUsage, config *CleaningConfig) int64 {
 	var targetSize int64
 
@@ -199,7 +203,12 @@ func calculateTargetSize(usage *DiskUsage, config *CleaningConfig) int64 {
 	return targetSize
 }
 
-// calculateThreshold calculates the time threshold for deletion
+// calculateThreshold calculates the time threshold for deletion.
+// Walks time slots oldest-first, accumulating size until targetSize is
+// reached, then sets threshold just past that slot. The deleter later
+// removes every file with ModTime strictly before threshold, so files in
+// the exact boundary slot are deleted too (that's why we add +1s here
+// rather than using the slot's own time).
 func calculateThreshold(slots []*timeSlot, targetSize int64) (time.Time, int, int64) {
 	var accumulatedSize int64
 	var accumulatedFiles int
@@ -217,7 +226,7 @@ func calculateThreshold(slots []*timeSlot, targetSize int64) (time.Time, int, in
 	for _, slot := range slots {
 		accumulatedSize += slot.totalBlockSize
 		accumulatedFiles += len(slot.files)
-		
+
 		if accumulatedSize >= targetSize {
 			// We've reached the target size
 			// Include all files up to and including this slot
@@ -244,7 +253,7 @@ func calculateThresholdForMaxSize(slots []*timeSlot, maxSize int64) (time.Time, 
 	var remainingSize int64
 	var deleteFiles int
 	var deleteSize int64
-	
+
 	// Calculate total size
 	for _, slot := range slots {
 		totalSize += slot.totalBlockSize
@@ -258,24 +267,28 @@ func calculateThresholdForMaxSize(slots []*timeSlot, maxSize int64) (time.Time, 
 	// Start from the newest files and work backwards
 	// We want to keep as much as possible under maxSize
 	remainingSize = totalSize
-	
+
 	// Find the cutoff point - delete old files until we're under maxSize
 	for i := 0; i < len(slots); i++ {
 		slot := slots[i]
-		
+
 		// Delete this entire slot
 		remainingSize -= slot.totalBlockSize
 		deleteFiles += len(slot.files)
 		deleteSize += slot.totalBlockSize
-		
+
 		// Check if we've deleted enough
 		if remainingSize <= maxSize {
-			// We've reached our target - set threshold to include this slot
-			// Add an hour to ensure all files in this time window are included
+			// We've reached our target - set threshold to include this slot.
+			// NOTE: unlike calculateThreshold above (which adds +1s), this
+			// path adds +1h. Both just need to land after the slot's
+			// Truncate()-rounded time and before the next slot, but the
+			// inconsistency is accidental, not intentional - keep in mind
+			// if TimeWindow is ever configured larger than 1h.
 			return slot.time.Add(time.Hour), deleteFiles, deleteSize
 		}
 	}
-	
+
 	// If we get here, we need to delete everything (shouldn't happen normally)
 	if len(slots) > 0 {
 		return time.Now().Add(time.Hour), deleteFiles, deleteSize

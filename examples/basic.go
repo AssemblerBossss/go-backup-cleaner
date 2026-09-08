@@ -12,12 +12,16 @@ import (
 func main() {
 	// Parse command line arguments
 	var (
-		dir        = flag.String("dir", "", "Directory to clean (required)")
-		minFree    = flag.Int64("min-free", 0, "Minimum free space in GB (recommended)")
-		maxUsage   = flag.Float64("max-usage", 0, "Maximum disk usage percentage")
-		maxSize    = flag.Int64("max-size", 0, "Maximum size in GB (use when disk info unavailable)")
-		dryRun     = flag.Bool("dry-run", false, "Show what would be deleted without actually deleting")
-		verbose    = flag.Bool("verbose", false, "Show detailed progress")
+		dir      = flag.String("dir", "", "Directory to clean (required)")
+		minFree  = flag.Int64("min-free", 0, "Minimum free space in GB (recommended)")
+		maxUsage = flag.Float64("max-usage", 0, "Maximum disk usage percentage")
+		maxSize  = flag.Int64("max-size", 0, "Maximum size in GB (use when disk info unavailable)")
+		// NOTE: this flag only changes the printed wording below (OnFileDeleted
+		// callback fires after os.Remove already ran in deleter.go). It does
+		// NOT currently prevent real deletion - there is no dry-run mode in
+		// the library itself yet. Treat this flag as cosmetic until that's added.
+		dryRun  = flag.Bool("dry-run", false, "Show what would be deleted without actually deleting")
+		verbose = flag.Bool("verbose", false, "Show detailed progress")
 	)
 	flag.Parse()
 
@@ -65,7 +69,7 @@ func main() {
 			OnScanComplete: func(info cleaner.ScanCompleteInfo) {
 				fmt.Printf("\nScan complete: %d files, %s total\n",
 					info.ScannedFiles, formatBytes(info.TotalSize))
-				fmt.Printf("Will delete files older than: %s\n", 
+				fmt.Printf("Will delete files older than: %s\n",
 					info.TimeThreshold.Format("2006-01-02 15:04:05"))
 			},
 			OnFileDeleted: func(info cleaner.FileDeletedInfo) {
