@@ -163,6 +163,28 @@ Run tests with coverage:
 go test -v -cover ./...
 ```
 
+## CLI
+
+Собрать инструмент:
+
+```bash
+go build -o backup-cleaner ./cmd/backup-cleaner
+```
+
+Запуск по YAML-конфигу (см. config.example.yaml):
+
+```bash
+./backup-cleaner -config config.yaml -verbose
+```
+
+Принудительный dry-run для всех targets сразу, независимо от того,
+что указано в самом YAML:
+
+```bash
+./backup-cleaner -config config.yaml -dry-run -verbose
+```
+
+
 ## License
 
 MIT License - see LICENSE file for details.

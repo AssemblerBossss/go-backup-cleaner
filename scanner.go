@@ -3,6 +3,7 @@ package gobackupcleaner
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -216,12 +217,7 @@ func sortTimeSlots(slots []*timeSlot) {
 	// O(n^2): работает нормально, пока количество слотов невелико (TimeWindow по умолчанию 5 минут
 	// на ограниченном интервале хранения), но если это когда-либо будет использоваться с гораздо
 	// меньшим TimeWindow или деревом с многолетним хранением, замените на sort.Slice.
-	n := len(slots)
-	for i := 0; i < n-1; i++ {
-		for j := 0; j < n-i-1; j++ {
-			if slots[j].time.After(slots[j+1].time) {
-				slots[j], slots[j+1] = slots[j+1], slots[j]
-			}
-		}
-	}
+	sort.Slice(slots, func(i, j int) bool {
+		return slots[i].time.Before(slots[j].time)
+	})
 }
