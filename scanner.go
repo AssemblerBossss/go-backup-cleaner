@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// fileInfo represents information about a file
+// fileInfo представляет информацию о файле
 type fileInfo struct {
 	path      string
 	size      int64
@@ -15,7 +15,7 @@ type fileInfo struct {
 	modTime   time.Time
 }
 
-// timeSlot represents files grouped by time interval
+// timeSlot представляет файлы, сгруппированные по временному интервалу
 type timeSlot struct {
 	time           time.Time
 	files          []fileInfo
@@ -23,12 +23,12 @@ type timeSlot struct {
 	totalBlockSize int64
 }
 
-// scanTask represents a task for parallel scanning
+// scanTask представляет задачу для параллельного сканирования
 type scanTask struct {
 	path string
 }
 
-// scanner handles file scanning operations
+// scanner управляет операциями сканирования файлов
 type scanner struct {
 	config      *CleaningConfig
 	blockSize   int64
@@ -37,7 +37,7 @@ type scanner struct {
 	timeSlots   map[time.Time]*timeSlot
 }
 
-// newScanner creates a new scanner instance
+// newScanner создаёт новый экземпляр сканера
 func newScanner(config *CleaningConfig, blockSize int64) *scanner {
 	return &scanner{
 		config:      config,
@@ -47,36 +47,36 @@ func newScanner(config *CleaningConfig, blockSize int64) *scanner {
 	}
 }
 
-// scan performs parallel file scanning
+// scan выполняет параллельное сканирование файлов
 func (s *scanner) scan(rootPath string) error {
 	taskChan := make(chan scanTask, 100)
 	errChan := make(chan error, s.workerCount)
 	var wg sync.WaitGroup
 	var taskWg sync.WaitGroup
 
-	// Start workers
+	// Запускаем рабочие процессы
 	for i := 0; i < s.workerCount; i++ {
 		wg.Add(1)
 		go s.worker(taskChan, errChan, &wg, &taskWg)
 	}
 
-	// Start with root directory
+	// Начинаем с корневой директории
 	taskWg.Add(1)
 	taskChan <- scanTask{path: rootPath}
 
-	// Close task channel when all tasks are done
+	// Закрываем канал задач, когда все задачи завершены
 	go func() {
 		taskWg.Wait()
 		close(taskChan)
 	}()
 
-	// Wait for all workers to complete
+	// Ожидаем завершения всех рабочих процессов
 	go func() {
 		wg.Wait()
 		close(errChan)
 	}()
 
-	// Collect errors
+	// Собираем ошибки
 	var firstErr error
 	for err := range errChan {
 		if firstErr == nil && err != nil {
@@ -93,7 +93,7 @@ func (s *scanner) scan(rootPath string) error {
 	return firstErr
 }
 
-// worker processes scan tasks
+// worker обрабатывает задачи сканирования
 func (s *scanner) worker(taskChan chan scanTask, errChan chan error, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -105,14 +105,14 @@ func (s *scanner) worker(taskChan chan scanTask, errChan chan error, wg *sync.Wa
 	}
 }
 
-// processPath processes a single path
+// processPath обрабатывает один путь
 func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.WaitGroup) error {
-	info, err := os.Lstat(path) // Use Lstat to detect symlinks
+	info, err := os.Lstat(path) // Используем Lstat для обнаружения символьных ссылок
 	if err != nil {
 		return err
 	}
 
-	// Skip symlinks
+	// Пропускаем символьные ссылки
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil
 	}
@@ -129,10 +129,11 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 			select {
 			case taskChan <- scanTask{path: fullPath}:
 			default:
-				// Task queue (cap 100) is saturated: recurse synchronously on this
-				// worker's own goroutine instead of blocking on send - avoids a
-				// deadlock if every worker ends up waiting to enqueue at once,
-				// and keeps deep/wide trees flowing without unbounded goroutines.
+				// Очередь задач (ёмкость 100) переполнена: рекурсивно обрабатываем синхронно
+				// в текущей горутине вместо блокировки на отправке — это предотвращает
+				// взаимоблокировку, если все рабочие процессы ожидают отправки,
+				// и обеспечивает непрерывную обработку глубоких/широких деревьев
+				// без неограниченного роста количества горутин.
 				taskWg.Done()
 				if err := s.processPath(fullPath, taskChan, taskWg); err != nil {
 					return err
@@ -153,10 +154,10 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 	return nil
 }
 
-// addFile adds a file to the appropriate time slot.
-// Files are never held in one giant slice - they're bucketed by
-// Truncate()-rounded mtime immediately, which is what keeps memory use
-// bounded on trees with millions of files (see TimeWindow in config.go).
+// addFile добавляет файл в соответствующий временной слот.
+// Файлы никогда не хранятся в одном огромном слайсе — они сразу группируются
+// по времени, округлённому с помощью Truncate(), что ограничивает использование
+// памяти в деревьях с миллионами файлов (см. TimeWindow в config.go).
 func (s *scanner) addFile(fi fileInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -178,7 +179,7 @@ func (s *scanner) addFile(fi fileInfo) {
 	slot.totalBlockSize += fi.blockSize
 }
 
-// getTimeSlots returns time slots sorted by time (oldest first)
+// getTimeSlots возвращает временные слоты, отсортированные по времени (сначала старые)
 func (s *scanner) getTimeSlots() []*timeSlot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,7 +194,7 @@ func (s *scanner) getTimeSlots() []*timeSlot {
 	return slots
 }
 
-// getTotalFiles returns the total number of scanned files
+// getTotalFiles возвращает общее количество отсканированных файлов
 func (s *scanner) getTotalFiles() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,10 +208,10 @@ func (s *scanner) getTotalFiles() int {
 
 // sortTimeSlots sorts time slots by time (oldest first)
 func sortTimeSlots(slots []*timeSlot) {
-	// Simple bubble sort for clarity (can be optimized if needed).
-	// O(n^2): fine while slot count stays small (TimeWindow default 5m over
-	// a bounded retention span), but if this ever gets driven by a much
-	// finer TimeWindow or a multi-year backup tree, swap for sort.Slice.
+	// Простая пузырьковая сортировка для ясности (может быть оптимизирована при необходимости).
+	// O(n^2): работает нормально, пока количество слотов невелико (TimeWindow по умолчанию 5 минут
+	// на ограниченном интервале хранения), но если это когда-либо будет использоваться с гораздо
+	// меньшим TimeWindow или деревом с многолетним хранением, замените на sort.Slice.
 	n := len(slots)
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-i-1; j++ {
