@@ -1,6 +1,7 @@
 package gobackupcleaner
 
 import (
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -89,6 +90,15 @@ func (c *CleaningConfig) ActualWorkerCount() int {
 		workers = c.MaxConcurrency
 	}
 	return workers
+}
+
+func (c *CleaningConfig) isExcluded(path string) bool {
+	if len(c.excludeExtSet) == 0 {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	_, found := c.excludeExtSet[ext]
+	return found
 }
 
 // validate проверяет, является ли конфигурация допустимой
