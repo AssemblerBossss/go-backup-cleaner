@@ -27,6 +27,10 @@ type CleaningConfig struct {
 	// ExcludeExtensions на каждый файл при сканировании миллионов файлов.
 	excludeExtSet map[string]struct{}
 
+	// DryRun — если true, все шаги cleaner'а выполняются как обычно,
+	// но реального os.Remove не происходит. CLI-флаг --dry-run
+	DryRun bool
+
 	// Настройки параллелизма
 	// Concurrency задаёт желаемый уровень параллелизма.
 	// Если значение 0, по умолчанию используется runtime.NumCPU().

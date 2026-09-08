@@ -163,8 +163,10 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 		size := info.Size()
 		blockSize := calculateBlockSize(size, d.blockSize)
 
-		if err := os.Remove(path); err != nil {
-			return err
+		if !d.config.DryRun {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
 		}
 
 		// Учитываем удалённый файл
@@ -234,8 +236,11 @@ func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
 
 	if len(entries) == 0 {
 		// Директория пуста, удаляем её
-		if err := os.Remove(dir); err != nil {
-			return err
+
+		if !d.config.DryRun {
+			if err := os.Remove(dir); err != nil {
+				return err
+			}
 		}
 
 		(*deletedCount)++
