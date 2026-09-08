@@ -141,7 +141,11 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 			}
 		}
 	} else if info.Mode().IsRegular() {
-		// Process regular file
+		//Обработка обычного файла
+		if s.config.isExcluded(path) {
+			return nil
+		}
+
 		fi := fileInfo{
 			path:      path,
 			size:      info.Size(),
