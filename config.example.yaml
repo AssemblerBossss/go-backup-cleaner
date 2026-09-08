@@ -1,0 +1,21 @@
+# Глобальные настройки — применяются ко всем targets, если target их
+# явно не переопределяет.
+concurrency: 4
+max_concurrency: 4
+time_window: 5m
+
+targets:
+  # У каждой директории — свои условия очистки и свой список
+  # исключений по расширению.
+  - path: /mnt/backups/site-a
+    min_free_space_gb: 10          # держать не менее 10 ГБ свободными
+    remove_empty_dirs: true
+    exclude_extensions: [.lock, .tmp]   # эти файлы никогда не трогаем
+
+  - path: /mnt/backups/site-b
+    max_usage_percent: 90          # не превышать 90% занятого места
+    exclude_extensions: [.db]
+
+  - path: /mnt/backups/site-c
+    max_size_gb: 500               # суммарный размер не более 500 ГБ
+    dry_run: true                  # только показать, что было бы удалено
