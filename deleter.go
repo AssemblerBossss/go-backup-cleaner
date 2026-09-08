@@ -7,20 +7,20 @@ import (
 	"time"
 )
 
-// deletedDirs tracks directories that contained deleted files
+// deletedDirs отслеживает директории, из которых были удалены файлы
 type deletedDirs struct {
 	mu   sync.Mutex
 	dirs map[string]struct{}
 }
 
-// add adds a directory to the set
+// add добавляет директорию в набор
 func (d *deletedDirs) add(dir string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dirs[dir] = struct{}{}
 }
 
-// toSlice returns all directories as a slice
+// toSlice возвращает все директории в виде среза
 func (d *deletedDirs) toSlice() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -32,7 +32,7 @@ func (d *deletedDirs) toSlice() []string {
 	return dirs
 }
 
-// deleter handles file deletion operations
+// deleter управляет операциями удаления файлов
 type deleter struct {
 	config        *CleaningConfig
 	blockSize     int64
@@ -44,7 +44,7 @@ type deleter struct {
 	deletedBlocks int64
 }
 
-// newDeleter creates a new deleter instance
+// newDeleter создаёт новый экземпляр deleter
 func newDeleter(config *CleaningConfig, blockSize int64) *deleter {
 	return &deleter{
 		config:      config,
@@ -56,36 +56,36 @@ func newDeleter(config *CleaningConfig, blockSize int64) *deleter {
 	}
 }
 
-// deleteFiles deletes files older than the threshold
+// deleteFiles удаляет файлы старше threshold
 func (d *deleter) deleteFiles(rootPath string, threshold time.Time) error {
 	taskChan := make(chan scanTask, 100)
 	errChan := make(chan error, d.workerCount)
 	var wg sync.WaitGroup
 	var taskWg sync.WaitGroup
 
-	// Start workers
+	// Запускаем рабочие процессы
 	for i := 0; i < d.workerCount; i++ {
 		wg.Add(1)
 		go d.worker(taskChan, errChan, threshold, &wg, &taskWg)
 	}
 
-	// Start with root directory
+	// Начинаем с корневой директории
 	taskWg.Add(1)
 	taskChan <- scanTask{path: rootPath}
 
-	// Close task channel when all tasks are done
+	// Закрываем канал задач, когда все задачи завершены
 	go func() {
 		taskWg.Wait()
 		close(taskChan)
 	}()
 
-	// Wait for all workers to complete
+	// Ожидаем завершения всех рабочих процессов
 	go func() {
 		wg.Wait()
 		close(errChan)
 	}()
 
-	// Collect errors
+	// Собираем ошибки
 	var firstErr error
 	for err := range errChan {
 		if firstErr == nil && err != nil {
@@ -102,7 +102,7 @@ func (d *deleter) deleteFiles(rootPath string, threshold time.Time) error {
 	return firstErr
 }
 
-// worker processes deletion tasks
+// worker обрабатывает задачи удаления
 func (d *deleter) worker(taskChan chan scanTask, errChan chan error, threshold time.Time, wg *sync.WaitGroup, taskWg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -114,18 +114,18 @@ func (d *deleter) worker(taskChan chan scanTask, errChan chan error, threshold t
 	}
 }
 
-// processPath processes a single path for deletion
+// processPath обрабатывает один путь для удаления
 func (d *deleter) processPath(path string, taskChan chan scanTask, threshold time.Time, taskWg *sync.WaitGroup) error {
-	info, err := os.Lstat(path) // Use Lstat to detect symlinks
+	info, err := os.Lstat(path) // Используем Lstat для обнаружения символьных ссылок
 	if err != nil {
 		if os.IsNotExist(err) {
-			// File already deleted, not an error
+			// Файл уже удалён, это не ошибка
 			return nil
 		}
 		return err
 	}
 
-	// Skip symlinks
+	// Пропускаем символьные ссылки
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil
 	}
@@ -142,7 +142,11 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 			select {
 			case taskChan <- scanTask{path: fullPath}:
 			default:
-				// If channel is full, process synchronously
+				// Очередь задач (ёмкость 100) переполнена: рекурсивно обрабатываем
+				// синхронно в текущей горутине вместо блокировки на отправке — это
+				// предотвращает взаимоблокировку, если все рабочие процессы ожидают
+				// отправки, и обеспечивает непрерывную обработку глубоких/широких
+				// деревьев без неограниченного роста количества горутин.
 				taskWg.Done()
 				if err := d.processPath(fullPath, taskChan, threshold, taskWg); err != nil {
 					return err
@@ -150,11 +154,12 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 			}
 		}
 	} else if info.Mode().IsRegular() && info.ModTime().Before(threshold) {
-		// Delete file if it's older than threshold.
-		// This is a fresh Lstat-based walk, independent of the scanner's
-		// timeSlot map - the deleter never holds the file list from phase 1
-		// in memory, it just re-visits the tree and re-checks each file's
-		// own ModTime against the single threshold computed in cleaner.go.
+		// Удаляем файл, если он старше threshold.
+		// Это самостоятельный, заново выполняемый обход на основе Lstat,
+		// независимый от карты timeSlots сканера — deleter никогда не хранит
+		// в памяти список файлов из фазы 1, он просто заново обходит дерево
+		// и заново проверяет ModTime каждого файла относительно единого
+		// threshold, вычисленного в cleaner.go.
 		size := info.Size()
 		blockSize := calculateBlockSize(size, d.blockSize)
 
@@ -162,17 +167,17 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 			return err
 		}
 
-		// Track deleted file
+		// Учитываем удалённый файл
 		d.mu.Lock()
 		d.deletedFiles++
 		d.deletedSize += size
 		d.deletedBlocks += blockSize
 		d.mu.Unlock()
 
-		// Track parent directory
+		// Запоминаем родительскую директорию
 		d.deletedDirs.add(filepath.Dir(path))
 
-		// Call callback
+		// Вызываем коллбэк
 		callSafe(d.config.Callbacks.OnFileDeleted, FileDeletedInfo{
 			Path:      path,
 			Size:      size,
@@ -184,7 +189,7 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 	return nil
 }
 
-// deleteEmptyDirs deletes empty directories
+// deleteEmptyDirs удаляет пустые директории
 func (d *deleter) deleteEmptyDirs() (int, error) {
 	if !d.config.RemoveEmptyDirs {
 		return 0, nil
@@ -193,7 +198,7 @@ func (d *deleter) deleteEmptyDirs() (int, error) {
 	deletedCount := 0
 	dirs := d.deletedDirs.toSlice()
 
-	// Process directories in reverse order (deepest first)
+	// Обрабатываем директории в обратном порядке (сначала самые глубокие)
 	for i := len(dirs) - 1; i >= 0; i-- {
 		dir := dirs[i]
 		if err := d.deleteEmptyDirRecursive(dir, &deletedCount); err != nil {
@@ -210,36 +215,37 @@ func (d *deleter) deleteEmptyDirs() (int, error) {
 	return deletedCount, nil
 }
 
-// deleteEmptyDirRecursive recursively deletes empty directories.
-// Starts only from directories that actually had a file deleted from them
-// (see deletedDirs), then walks upward: removing a dir can make its parent
-// empty too, so each successful removal retries one level up until it hits
-// a non-empty (or root/"." ) directory.
+// deleteEmptyDirRecursive рекурсивно удаляет пустые директории.
+// Стартует только с директорий, из которых реально был удалён файл
+// (см. deletedDirs), затем идёт вверх по дереву: удаление директории может
+// сделать пустой и её родителя, поэтому после каждого успешного удаления
+// делается попытка удалить директорию уровнем выше, пока не встретится
+// непустая директория (или корень/".").
 func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
-	// Check if directory is empty
+	// Проверяем, пуста ли директория
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Directory already deleted
+			// Директория уже удалена
 			return nil
 		}
 		return err
 	}
 
 	if len(entries) == 0 {
-		// Directory is empty, delete it
+		// Директория пуста, удаляем её
 		if err := os.Remove(dir); err != nil {
 			return err
 		}
 
 		(*deletedCount)++
 
-		// Call callback
+		// Вызываем коллбэк
 		callSafe(d.config.Callbacks.OnDirDeleted, DirDeletedInfo{
 			Path: dir,
 		})
 
-		// Try to delete parent directory
+		// Пробуем удалить родительскую директорию
 		parent := filepath.Dir(dir)
 		if parent != dir && parent != "." && parent != "/" {
 			return d.deleteEmptyDirRecursive(parent, deletedCount)
@@ -249,7 +255,7 @@ func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
 	return nil
 }
 
-// getStats returns deletion statistics
+// getStats возвращает статистику удаления
 func (d *deleter) getStats() (files int, size int64, blocks int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

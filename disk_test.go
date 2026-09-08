@@ -8,13 +8,13 @@ import (
 func TestDefaultDiskInfoProvider(t *testing.T) {
 	provider := &DefaultDiskInfoProvider{}
 
-	// Test with current directory
+	// Тестируем на текущей директории
 	usage, err := provider.GetDiskUsage(".")
 	if err != nil {
 		t.Fatalf("Failed to get disk usage: %v", err)
 	}
 
-	// Basic sanity checks
+	// Базовые проверки на здравый смысл
 	if usage.Total == 0 {
 		t.Error("Total disk size should not be 0")
 	}
@@ -31,7 +31,7 @@ func TestDefaultDiskInfoProvider(t *testing.T) {
 		t.Errorf("UsedPercent should be between 0 and 100, got %f", usage.UsedPercent)
 	}
 
-	// Test block size
+	// Проверяем размер блока
 	blockSize, err := provider.GetBlockSize(".")
 	if err != nil {
 		t.Fatalf("Failed to get block size: %v", err)
@@ -99,7 +99,7 @@ func TestCalculateBlockSize(t *testing.T) {
 func TestDiskInfoProviderWithInvalidPath(t *testing.T) {
 	provider := &DefaultDiskInfoProvider{}
 
-	// Test with non-existent path
+	// Тестируем на несуществующем пути
 	tmpFile, err := os.CreateTemp("", "test")
 	if err != nil {
 		t.Fatal(err)

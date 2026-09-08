@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// TestCleanBackup tests the main CleanBackup function
+// TestCleanBackup тестирует основную функцию CleanBackup
 func TestCleanBackup(t *testing.T) {
-	// Create a temporary directory for testing
+	// Создаём временную директорию для теста
 	tmpDir, err := os.MkdirTemp("", "backup-cleaner-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestCleanBackup(t *testing.T) {
 		}
 	}()
 
-	// Create test files with different timestamps
+	// Создаём тестовые файлы с разными временными метками
 	now := time.Now()
 	testFiles := []struct {
 		name    string
@@ -35,7 +35,7 @@ func TestCleanBackup(t *testing.T) {
 		{"recent2.txt", 256, now.Add(-30 * time.Minute)},
 	}
 
-	// Create test files
+	// Создаём тестовые файлы
 	for _, tf := range testFiles {
 		path := filepath.Join(tmpDir, tf.name)
 		if err := createTestFile(t, path, tf.size, tf.modTime); err != nil {
@@ -43,7 +43,7 @@ func TestCleanBackup(t *testing.T) {
 		}
 	}
 
-	// Create subdirectory with files
+	// Создаём поддиректорию с файлами
 	subDir := filepath.Join(tmpDir, "subdir")
 	if err := os.Mkdir(subDir, 0755); err != nil {
 		t.Fatal(err)
@@ -52,8 +52,8 @@ func TestCleanBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Test with MaxUsagePercent configuration
-	// The mock provider shows 80% usage, we want to reduce to 70%
+	// Тестируем с конфигурацией MaxUsagePercent.
+	// Mock-провайдер показывает использование 80%, хотим снизить до 70%
 	maxUsage := float64(70)
 	config := CleaningConfig{
 		MaxUsagePercent: &maxUsage,
@@ -68,11 +68,11 @@ func TestCleanBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Log the report for debugging
+	// Логируем отчёт для отладки
 	t.Logf("Report: DeletedFiles=%d, DeletedSize=%d, TimeThreshold=%v",
 		report.DeletedFiles, report.DeletedSize, report.TimeThreshold)
 
-	// Verify results
+	// Проверяем результаты
 	if report.DeletedFiles == 0 {
 		t.Error("Expected some files to be deleted")
 	}
@@ -80,9 +80,9 @@ func TestCleanBackup(t *testing.T) {
 		t.Error("Expected some bytes to be deleted")
 	}
 
-	// The deletion should have removed some old files
-	// but the exact files depend on the target size calculation
-	// Let's just verify that we deleted something and not everything
+	// Удаление должно было убрать часть старых файлов,
+	// но конкретный набор зависит от расчёта целевого размера.
+	// Просто проверим, что удалилось что-то, но не всё
 	remainingFiles := 0
 	files := []string{"old1.txt", "old2.txt", "recent1.txt", "recent2.txt"}
 	for _, fname := range files {
@@ -99,7 +99,7 @@ func TestCleanBackup(t *testing.T) {
 	}
 }
 
-// TestCalculateTargetSize tests the target size calculation
+// TestCalculateTargetSize тестирует расчёт целевого размера
 func TestCalculateTargetSize(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -186,7 +186,7 @@ func TestCalculateTargetSize(t *testing.T) {
 	}
 }
 
-// TestConfigValidation tests configuration validation
+// TestConfigValidation тестирует проверку конфигурации
 func TestConfigValidation(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -267,7 +267,7 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-// TestCallbacks tests that callbacks are called correctly
+// TestCallbacks тестирует, что коллбэки вызываются корректно
 func TestCallbacks(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "callback-test-*")
 	if err != nil {
@@ -279,18 +279,18 @@ func TestCallbacks(t *testing.T) {
 		}
 	}()
 
-	// Create multiple test files
+	// Создаём несколько тестовых файлов
 	now := time.Now()
 	for i := 0; i < 5; i++ {
 		testFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.txt", i))
-		// Create files with varying ages
+		// Создаём файлы с разным возрастом
 		age := time.Duration(i+1) * 24 * time.Hour
 		if err := createTestFile(t, testFile, 1024*1024, now.Add(-age)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// Track callback calls
+	// Отслеживаем вызовы коллбэков
 	var (
 		mu                 sync.Mutex
 		startCalled        bool
@@ -301,8 +301,8 @@ func TestCallbacks(t *testing.T) {
 		deletedCount       int
 	)
 
-	// Set max usage to force some deletion
-	maxUsage := float64(70) // Current mock shows 80% usage
+	// Задаём max usage, чтобы принудительно вызвать удаление
+	maxUsage := float64(70) // Текущий mock показывает использование 80%
 	config := CleaningConfig{
 		MaxUsagePercent: &maxUsage,
 		Callbacks: Callbacks{
@@ -349,7 +349,7 @@ func TestCallbacks(t *testing.T) {
 	t.Logf("Report: DeletedFiles=%d, DeletedSize=%d, TimeThreshold=%v",
 		report.DeletedFiles, report.DeletedSize, report.TimeThreshold)
 
-	// Verify all callbacks were called
+	// Проверяем, что все коллбэки были вызваны
 	if !startCalled {
 		t.Error("OnStart callback was not called")
 	}
@@ -367,7 +367,7 @@ func TestCallbacks(t *testing.T) {
 	}
 }
 
-// Helper functions
+// Вспомогательные функции
 
 func createTestFile(t *testing.T, path string, size int64, modTime time.Time) error {
 	file, err := os.Create(path)
@@ -380,13 +380,13 @@ func createTestFile(t *testing.T, path string, size int64, modTime time.Time) er
 		}
 	}()
 
-	// Write data
+	// Записываем данные
 	data := make([]byte, size)
 	if _, err := file.Write(data); err != nil {
 		return err
 	}
 
-	// Set modification time
+	// Устанавливаем время изменения
 	return os.Chtimes(path, modTime, modTime)
 }
 
@@ -398,13 +398,13 @@ func float64Ptr(v float64) *float64 {
 	return &v
 }
 
-// mockDiskInfoProvider is a mock implementation for testing
+// mockDiskInfoProvider — mock-реализация для тестов
 type mockDiskInfoProvider struct{}
 
 func (m *mockDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
 	return &DiskUsage{
 		Total:       10 * 1024 * 1024 * 1024, // 10GB
-		Used:        8 * 1024 * 1024 * 1024,  // 8GB - high usage to trigger cleanup
+		Used:        8 * 1024 * 1024 * 1024,  // 8GB - высокая загрузка, чтобы спровоцировать очистку
 		Free:        2 * 1024 * 1024 * 1024,  // 2GB
 		UsedPercent: 80.0,
 	}, nil
@@ -414,7 +414,7 @@ func (m *mockDiskInfoProvider) GetBlockSize(path string) (int64, error) {
 	return 4096, nil
 }
 
-// failingDiskInfoProvider simulates disk usage retrieval failure
+// failingDiskInfoProvider имитирует сбой при получении данных об использовании диска
 type failingDiskInfoProvider struct{}
 
 func (f *failingDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
@@ -425,9 +425,9 @@ func (f *failingDiskInfoProvider) GetBlockSize(path string) (int64, error) {
 	return 4096, nil
 }
 
-// TestCleanBackupWithoutDiskUsage tests cleaning when disk usage is not available
+// TestCleanBackupWithoutDiskUsage тестирует очистку, когда данные об использовании диска недоступны
 func TestCleanBackupWithoutDiskUsage(t *testing.T) {
-	// Create a temporary directory for testing
+	// Создаём временную директорию для теста
 	tmpDir, err := os.MkdirTemp("", "backup-cleaner-nodisk-*")
 	if err != nil {
 		t.Fatal(err)
@@ -438,7 +438,7 @@ func TestCleanBackupWithoutDiskUsage(t *testing.T) {
 		}
 	}()
 
-	// Create test files
+	// Создаём тестовые файлы
 	now := time.Now()
 	testFiles := []struct {
 		name    string
@@ -451,7 +451,7 @@ func TestCleanBackupWithoutDiskUsage(t *testing.T) {
 		{"recent2.txt", 256 * 1024, now.Add(-30 * time.Minute)}, // 256KB
 	}
 
-	// Create test files
+	// Создаём тестовые файлы
 	var totalTestSize int64
 	for _, tf := range testFiles {
 		path := filepath.Join(tmpDir, tf.name)
@@ -463,7 +463,7 @@ func TestCleanBackupWithoutDiskUsage(t *testing.T) {
 		t.Logf("Created %s: %d bytes (block: %d), modTime: %v", tf.name, tf.size, blockSize, tf.modTime)
 	}
 
-	// Test with MaxSize when disk usage is not available
+	// Тестируем с MaxSize, когда данные об использовании диска недоступны
 	maxSize := int64(2 * 1024 * 1024) // 2MB max
 	t.Logf("Total test size (blocks): %d, MaxSize: %d", totalTestSize, maxSize)
 	config := CleaningConfig{
@@ -478,17 +478,17 @@ func TestCleanBackupWithoutDiskUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should have deleted old files to get under 2MB
+	// Должны были удалиться старые файлы, чтобы уложиться в 2MB
 	if report.DeletedFiles == 0 {
 		t.Error("Expected some files to be deleted")
 	}
 
 	t.Logf("TimeThreshold: %v", report.TimeThreshold)
 
-	// Verify that files were deleted
+	// Проверяем, что файлы были удалены
 	t.Logf("Deleted %d files, %d bytes", report.DeletedFiles, report.DeletedSize)
 
-	// Check which files remain
+	// Проверяем, какие файлы остались
 	remainingFiles := 0
 	var remainingSize int64
 	var remainingBlockSize int64
@@ -505,14 +505,15 @@ func TestCleanBackupWithoutDiskUsage(t *testing.T) {
 		}
 	}
 
-	// The algorithm should keep total block size under maxSize
-	// We need to check block-aligned sizes, not actual file sizes
+	// Алгоритм должен удерживать суммарный размер по блокам в пределах maxSize.
+	// Нужно проверять размер с учётом блоков, а не фактический размер файлов
 	if remainingBlockSize > maxSize {
 		t.Errorf("Remaining block size %d exceeds max size %d", remainingBlockSize, maxSize)
 	}
 }
 
-// TestCleanBackupWithoutDiskUsageAndNoMaxSize tests that we fail gracefully when disk usage is not available and no MaxSize
+// TestCleanBackupWithoutDiskUsageAndNoMaxSize проверяет корректный отказ,
+// когда данные об использовании диска недоступны и MaxSize не задан
 func TestCleanBackupWithoutDiskUsageAndNoMaxSize(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "backup-cleaner-fail-*")
 	if err != nil {
@@ -524,12 +525,12 @@ func TestCleanBackupWithoutDiskUsageAndNoMaxSize(t *testing.T) {
 		}
 	}()
 
-	// Create a test file
+	// Создаём тестовый файл
 	if err := createTestFile(t, filepath.Join(tmpDir, "test.txt"), 1024, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
-	// Test with only MaxUsagePercent when disk usage is not available
+	// Тестируем с одним лишь MaxUsagePercent, когда данные об использовании диска недоступны
 	maxUsage := float64(70)
 	config := CleaningConfig{
 		MaxUsagePercent: &maxUsage,

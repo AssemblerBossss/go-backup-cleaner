@@ -10,16 +10,17 @@ import (
 )
 
 func main() {
-	// Parse command line arguments
+	// Разбираем аргументы командной строки
 	var (
 		dir      = flag.String("dir", "", "Directory to clean (required)")
 		minFree  = flag.Int64("min-free", 0, "Minimum free space in GB (recommended)")
 		maxUsage = flag.Float64("max-usage", 0, "Maximum disk usage percentage")
 		maxSize  = flag.Int64("max-size", 0, "Maximum size in GB (use when disk info unavailable)")
-		// NOTE: this flag only changes the printed wording below (OnFileDeleted
-		// callback fires after os.Remove already ran in deleter.go). It does
-		// NOT currently prevent real deletion - there is no dry-run mode in
-		// the library itself yet. Treat this flag as cosmetic until that's added.
+		// ПРИМЕЧАНИЕ: этот флаг сейчас влияет только на текст в выводе ниже
+		// (коллбэк OnFileDeleted срабатывает уже ПОСЛЕ того, как os.Remove
+		// отработал в deleter.go). Реального удаления он пока НЕ блокирует —
+		// настоящего dry-run режима в самой библиотеке ещё нет. Считай этот
+		// флаг косметическим, пока это не добавлено.
 		dryRun  = flag.Bool("dry-run", false, "Show what would be deleted without actually deleting")
 		verbose = flag.Bool("verbose", false, "Show detailed progress")
 	)
@@ -29,7 +30,7 @@ func main() {
 		log.Fatal("Directory is required. Use -dir flag")
 	}
 
-	// Convert GB to bytes
+	// Переводим гигабайты в байты
 	var minFreeBytes *int64
 	if *minFree > 0 {
 		bytes := *minFree * 1024 * 1024 * 1024
@@ -47,7 +48,7 @@ func main() {
 		maxSizeBytes = &bytes
 	}
 
-	// Create configuration (MinFreeSpace is the recommended primary option)
+	// Формируем конфигурацию (MinFreeSpace — рекомендуемый основной вариант)
 	config := cleaner.CleaningConfig{
 		MinFreeSpace:    minFreeBytes,
 		MaxUsagePercent: maxUsagePtr,
@@ -55,7 +56,7 @@ func main() {
 		RemoveEmptyDirs: true,
 	}
 
-	// Set up callbacks if verbose
+	// Настраиваем коллбэки, если включён подробный вывод
 	if *verbose {
 		config.Callbacks = cleaner.Callbacks{
 			OnStart: func(info cleaner.StartInfo) {
@@ -92,12 +93,12 @@ func main() {
 		}
 	}
 
-	// Validate configuration has at least one constraint
+	// Проверяем, что задано хотя бы одно ограничение
 	if minFreeBytes == nil && maxUsagePtr == nil && maxSizeBytes == nil {
 		log.Fatal("At least one constraint required: -min-free (recommended), -max-usage, or -max-size")
 	}
 
-	// Check current disk space if needed
+	// При необходимости проверяем текущее свободное место на диске
 	if *verbose || minFreeBytes != nil {
 		freeSpace, err := cleaner.GetDiskFreeSpace(*dir)
 		if err != nil {
@@ -112,14 +113,14 @@ func main() {
 		}
 	}
 
-	// Run cleanup
+	// Запускаем очистку
 	start := time.Now()
 	report, err := cleaner.CleanBackup(*dir, config)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Print summary
+	// Выводим итог
 	fmt.Printf("\nCleanup complete in %v\n", time.Since(start))
 	fmt.Printf("Deleted: %d files, %d directories\n", report.DeletedFiles, report.DeletedDirs)
 	fmt.Printf("Freed: %s (actual disk space: %s)\n",

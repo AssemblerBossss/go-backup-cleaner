@@ -10,33 +10,33 @@ import (
 	"unsafe"
 )
 
-// This implementation uses Windows API directly via syscall
-// No external dependencies are required
+// Эта реализация использует Windows API напрямую через syscall,
+// внешние зависимости не требуются
 
 var (
-	kernel32                = syscall.NewLazyDLL("kernel32.dll")
-	procGetDiskFreeSpaceEx  = kernel32.NewProc("GetDiskFreeSpaceExW")
-	procGetDiskFreeSpace    = kernel32.NewProc("GetDiskFreeSpaceW")
+	kernel32               = syscall.NewLazyDLL("kernel32.dll")
+	procGetDiskFreeSpaceEx = kernel32.NewProc("GetDiskFreeSpaceExW")
+	procGetDiskFreeSpace   = kernel32.NewProc("GetDiskFreeSpaceW")
 )
 
-// GetDiskUsage returns disk usage information for the given path
+// GetDiskUsage возвращает информацию об использовании диска для указанного пути
 func (d *DefaultDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
 
-	// For non-existent paths, we should use the path itself to check, not just the volume
-	// Try to get disk info using the path first, then fall back to volume
+	// Для несуществующих путей нужно проверять сам путь, а не только том.
+	// Сначала пробуем получить информацию о диске по самому пути, затем — по тому
 	var freeBytesAvailable, totalBytes, totalFreeBytes uint64
 
-	// Convert path to UTF16 for Windows API
+	// Преобразуем путь в UTF16 для Windows API
 	pathPtr, err := syscall.UTF16PtrFromString(absPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// First try with the actual path
+	// Сначала пробуем с фактическим путём
 	ret, _, err := procGetDiskFreeSpaceEx.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(&freeBytesAvailable)),
@@ -45,7 +45,7 @@ func (d *DefaultDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) 
 	)
 
 	if ret == 0 {
-		// If the path doesn't exist, this should fail
+		// Если путь не существует, вызов должен завершиться ошибкой
 		return nil, err
 	}
 
@@ -65,14 +65,14 @@ func (d *DefaultDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) 
 	}, nil
 }
 
-// GetBlockSize returns the block size for the given path
+// GetBlockSize возвращает размер блока для указанного пути
 func (d *DefaultDiskInfoProvider) GetBlockSize(path string) (int64, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return 0, err
 	}
 
-	// Convert path to UTF16 for Windows API
+	// Преобразуем путь в UTF16 для Windows API
 	pathPtr, err := syscall.UTF16PtrFromString(absPath)
 	if err != nil {
 		return 0, err
@@ -80,7 +80,7 @@ func (d *DefaultDiskInfoProvider) GetBlockSize(path string) (int64, error) {
 
 	var sectorsPerCluster, bytesPerSector, numberOfFreeClusters, totalNumberOfClusters uint32
 
-	// First try with the actual path
+	// Сначала пробуем с фактическим путём
 	ret, _, err := procGetDiskFreeSpace.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(&sectorsPerCluster)),
@@ -90,11 +90,11 @@ func (d *DefaultDiskInfoProvider) GetBlockSize(path string) (int64, error) {
 	)
 
 	if ret == 0 {
-		// If the path doesn't exist, this should fail
+		// Если путь не существует, вызов должен завершиться ошибкой
 		return 0, err
 	}
 
-	// Cluster size is the effective "block size" on Windows
+	// Размер кластера — это эффективный "размер блока" в Windows
 	clusterSize := int64(sectorsPerCluster) * int64(bytesPerSector)
 	return clusterSize, nil
 }

@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// GetDiskUsage returns disk usage information for the given path
+// GetDiskUsage возвращает информацию об использовании диска для указанного пути
 func (d *DefaultDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
 	var stat syscall.Statfs_t
 	err := syscall.Statfs(path, &stat)
@@ -34,7 +34,7 @@ func (d *DefaultDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) 
 	}, nil
 }
 
-// GetBlockSize returns the block size for the given path
+// GetBlockSize возвращает размер блока для указанного пути
 func (d *DefaultDiskInfoProvider) GetBlockSize(path string) (int64, error) {
 	var stat syscall.Statfs_t
 	err := syscall.Statfs(path, &stat)

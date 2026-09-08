@@ -166,7 +166,7 @@ func (s *scanner) addFile(fi fileInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Round time down to the nearest time window
+	// Округляем время вниз до ближайшей границы временного окна
 	slotTime := fi.modTime.Truncate(s.config.TimeWindow)
 
 	slot, exists := s.timeSlots[slotTime]
@@ -193,7 +193,7 @@ func (s *scanner) getTimeSlots() []*timeSlot {
 		slots = append(slots, slot)
 	}
 
-	// Sort by time (oldest first)
+	// Сортируем по времени (сначала старые)
 	sortTimeSlots(slots)
 	return slots
 }
@@ -210,7 +210,7 @@ func (s *scanner) getTotalFiles() int {
 	return total
 }
 
-// sortTimeSlots sorts time slots by time (oldest first)
+// sortTimeSlots сортирует временные слоты по времени (сначала старые)
 func sortTimeSlots(slots []*timeSlot) {
 	// Простая пузырьковая сортировка для ясности (может быть оптимизирована при необходимости).
 	// O(n^2): работает нормально, пока количество слотов невелико (TimeWindow по умолчанию 5 минут

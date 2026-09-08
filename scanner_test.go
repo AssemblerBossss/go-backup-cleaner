@@ -8,7 +8,7 @@ import (
 )
 
 func TestScanner(t *testing.T) {
-	// Create temporary directory
+	// Создаём временную директорию
 	tmpDir, err := os.MkdirTemp("", "scanner-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -19,7 +19,7 @@ func TestScanner(t *testing.T) {
 		}
 	}()
 
-	// Create test file structure
+	// Создаём структуру тестовых файлов
 	now := time.Now()
 	testFiles := []struct {
 		path    string
@@ -32,7 +32,7 @@ func TestScanner(t *testing.T) {
 		{"dir1/dir2/file4.txt", 256, now},
 	}
 
-	// Create directories
+	// Создаём директории
 	if err := os.Mkdir(filepath.Join(tmpDir, "dir1"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestScanner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create files
+	// Создаём файлы
 	for _, tf := range testFiles {
 		path := filepath.Join(tmpDir, tf.path)
 		if err := createTestFile(t, path, tf.size, tf.modTime); err != nil {
@@ -48,7 +48,7 @@ func TestScanner(t *testing.T) {
 		}
 	}
 
-	// Test scanner
+	// Тестируем сканер
 	config := CleaningConfig{
 		TimeWindow:  time.Hour,
 		Concurrency: 2,
@@ -58,19 +58,19 @@ func TestScanner(t *testing.T) {
 	scanner := newScanner(&config, 4096)
 	_ = scanner.scan(tmpDir)
 
-	// Verify results
+	// Проверяем результаты
 	totalFiles := scanner.getTotalFiles()
 	if totalFiles != len(testFiles) {
 		t.Errorf("Expected %d files, got %d", len(testFiles), totalFiles)
 	}
 
-	// Test time slots
+	// Проверяем временные слоты
 	slots := scanner.getTimeSlots()
 	if len(slots) == 0 {
 		t.Error("Expected at least one time slot")
 	}
 
-	// Verify slots are sorted (oldest first)
+	// Проверяем, что слоты отсортированы (сначала старые)
 	for i := 1; i < len(slots); i++ {
 		if slots[i-1].time.After(slots[i].time) {
 			t.Error("Time slots are not sorted correctly")
@@ -79,7 +79,7 @@ func TestScanner(t *testing.T) {
 }
 
 func TestScannerWithSymlinks(t *testing.T) {
-	// Create temporary directory
+	// Создаём временную директорию
 	tmpDir, err := os.MkdirTemp("", "scanner-symlink-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestScannerWithSymlinks(t *testing.T) {
 		}
 	}()
 
-	// Create a file and a symlink
+	// Создаём файл и символьную ссылку на него
 	testFile := filepath.Join(tmpDir, "test.txt")
 	if err := createTestFile(t, testFile, 1024, time.Now()); err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestScannerWithSymlinks(t *testing.T) {
 		t.Skip("Cannot create symlinks on this system")
 	}
 
-	// Test scanner
+	// Тестируем сканер
 	config := CleaningConfig{
 		TimeWindow:  time.Hour,
 		Concurrency: 1,
@@ -111,7 +111,7 @@ func TestScannerWithSymlinks(t *testing.T) {
 	scanner := newScanner(&config, 4096)
 	_ = scanner.scan(tmpDir)
 
-	// Should only count regular files, not symlinks
+	// Должны учитываться только обычные файлы, символьные ссылки — нет
 	totalFiles := scanner.getTotalFiles()
 	if totalFiles != 1 {
 		t.Errorf("Expected 1 file (symlinks should be ignored), got %d", totalFiles)
@@ -119,7 +119,7 @@ func TestScannerWithSymlinks(t *testing.T) {
 }
 
 func TestScannerWithPermissionError(t *testing.T) {
-	// Create temporary directory
+	// Создаём временную директорию
 	tmpDir, err := os.MkdirTemp("", "scanner-perm-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -130,18 +130,18 @@ func TestScannerWithPermissionError(t *testing.T) {
 		}
 	}()
 
-	// Create a directory with no read permission
+	// Создаём директорию без прав на чтение
 	restrictedDir := filepath.Join(tmpDir, "restricted")
 	if err := os.Mkdir(restrictedDir, 0000); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create a normal file
+	// Создаём обычный файл
 	if err := createTestFile(t, filepath.Join(tmpDir, "normal.txt"), 1024, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
-	// Test scanner with error callback
+	// Тестируем сканер с коллбэком ошибок
 	errorCount := 0
 	config := CleaningConfig{
 		TimeWindow:  time.Hour,
@@ -157,13 +157,13 @@ func TestScannerWithPermissionError(t *testing.T) {
 	scanner := newScanner(&config, 4096)
 	_ = scanner.scan(tmpDir)
 
-	// Should continue despite permission error
+	// Обработка должна продолжиться, несмотря на ошибку доступа
 	totalFiles := scanner.getTotalFiles()
 	if totalFiles != 1 {
 		t.Errorf("Expected 1 file despite permission error, got %d", totalFiles)
 	}
 
-	// Restore permissions for cleanup
+	// Восстанавливаем права для последующей очистки
 	if err := os.Chmod(restrictedDir, 0755); err != nil {
 		t.Logf("Warning: failed to restore permissions: %v", err)
 	}
@@ -178,10 +178,10 @@ func TestTimeSlotAggregation(t *testing.T) {
 
 	scanner := newScanner(&config, 4096)
 
-	// Add files with different timestamps
+	// Добавляем файлы с разными временными метками
 	baseTime := time.Now().Truncate(time.Hour)
 
-	// Files in the same time window
+	// Файлы в одном временном окне
 	scanner.addFile(fileInfo{
 		path:      "file1.txt",
 		size:      1000,
@@ -195,7 +195,7 @@ func TestTimeSlotAggregation(t *testing.T) {
 		modTime:   baseTime.Add(30 * time.Minute),
 	})
 
-	// File in different time window
+	// Файл в другом временном окне
 	scanner.addFile(fileInfo{
 		path:      "file3.txt",
 		size:      3000,
@@ -208,7 +208,7 @@ func TestTimeSlotAggregation(t *testing.T) {
 		t.Errorf("Expected 2 time slots, got %d", len(slots))
 	}
 
-	// Check first slot
+	// Проверяем первый слот
 	if len(slots[0].files) != 2 {
 		t.Errorf("Expected 2 files in first slot, got %d", len(slots[0].files))
 	}
@@ -219,7 +219,7 @@ func TestTimeSlotAggregation(t *testing.T) {
 		t.Errorf("Expected total block size 8192 in first slot, got %d", slots[0].totalBlockSize)
 	}
 
-	// Check second slot
+	// Проверяем второй слот
 	if len(slots[1].files) != 1 {
 		t.Errorf("Expected 1 file in second slot, got %d", len(slots[1].files))
 	}

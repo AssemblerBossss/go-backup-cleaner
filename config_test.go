@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// TestConfigConcurrencyDefaults tests the concurrency default settings
+// TestConfigConcurrencyDefaults тестирует настройки параллелизма по умолчанию
 func TestConfigConcurrencyDefaults(t *testing.T) {
 	tests := []struct {
 		name                   string
@@ -77,23 +77,23 @@ func min(a, b int) int {
 	return b
 }
 
-// TestConfigTimeWindowDefault tests the TimeWindow default value
+// TestConfigTimeWindowDefault тестирует значение TimeWindow по умолчанию
 func TestConfigTimeWindowDefault(t *testing.T) {
 	config := CleaningConfig{}
 	config.setDefaults()
-	
+
 	expectedWindow := 5 * time.Minute
 	if config.TimeWindow != expectedWindow {
 		t.Errorf("Expected TimeWindow %v, got %v", expectedWindow, config.TimeWindow)
 	}
-	
-	// Test that explicit value is not overridden
+
+	// Проверяем, что явно заданное значение не перезаписывается
 	customWindow := 10 * time.Minute
 	config2 := CleaningConfig{
 		TimeWindow: customWindow,
 	}
 	config2.setDefaults()
-	
+
 	if config2.TimeWindow != customWindow {
 		t.Errorf("Expected TimeWindow %v, got %v", customWindow, config2.TimeWindow)
 	}

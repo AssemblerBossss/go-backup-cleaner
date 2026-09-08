@@ -1,6 +1,6 @@
 package gobackupcleaner
 
-// DiskUsage represents disk usage information
+// DiskUsage представляет информацию об использовании диска
 type DiskUsage struct {
 	Total       uint64
 	Free        uint64
@@ -8,16 +8,16 @@ type DiskUsage struct {
 	UsedPercent float64
 }
 
-// DiskInfoProvider is an interface for getting disk information
+// DiskInfoProvider — интерфейс для получения информации о диске
 type DiskInfoProvider interface {
 	GetDiskUsage(path string) (*DiskUsage, error)
 	GetBlockSize(path string) (int64, error)
 }
 
-// DefaultDiskInfoProvider is the default implementation of DiskInfoProvider
+// DefaultDiskInfoProvider — реализация DiskInfoProvider по умолчанию
 type DefaultDiskInfoProvider struct{}
 
-// calculateBlockSize calculates the actual block size used by a file
+// calculateBlockSize вычисляет фактический размер блока, занимаемого файлом
 func calculateBlockSize(fileSize int64, blockSize int64) int64 {
 	if blockSize <= 0 {
 		return fileSize
@@ -26,28 +26,29 @@ func calculateBlockSize(fileSize int64, blockSize int64) int64 {
 	return blocks * blockSize
 }
 
-// GetDiskFreeSpace returns the available disk space for the given directory path
-// using the default disk info provider.
-// This is a convenience function useful for quickly checking if cleanup is needed
-// before performing the actual backup cleaning operation.
+// GetDiskFreeSpace возвращает доступное место на диске для указанного пути
+// директории, используя провайдер информации о диске по умолчанию.
+// Это вспомогательная функция, полезная для быстрой проверки необходимости
+// очистки перед выполнением самой операции очистки резервных копий.
 //
-// When using MinFreeSpace configuration (recommended), you can use this function
-// to pre-check if cleanup is necessary:
+// При использовании конфигурации MinFreeSpace (рекомендуется) эту функцию
+// можно использовать для предварительной проверки необходимости очистки:
 //
 //	freeSpace, err := GetDiskFreeSpace("/backup")
 //	if err == nil && freeSpace < requiredSpace {
-//	    // Perform cleanup
+//	    // Выполняем очистку
 //	}
 func GetDiskFreeSpace(dirPath string) (int64, error) {
 	provider := &DefaultDiskInfoProvider{}
 	return GetDiskFreeSpaceWithProvider(dirPath, provider)
 }
 
-// GetDiskFreeSpaceWithProvider returns the available disk space for the given directory path
-// using a custom disk info provider. This allows for dependency injection and testing
-// with mock providers.
+// GetDiskFreeSpaceWithProvider возвращает доступное место на диске для
+// указанного пути директории, используя пользовательский провайдер
+// информации о диске. Это позволяет внедрять зависимости и тестировать
+// с помощью mock-провайдеров.
 //
-// Example with custom provider:
+// Пример с пользовательским провайдером:
 //
 //	provider := &CustomDiskInfoProvider{}
 //	freeSpace, err := GetDiskFreeSpaceWithProvider("/backup", provider)

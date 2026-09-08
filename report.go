@@ -2,21 +2,21 @@ package gobackupcleaner
 
 import "time"
 
-// CleaningReport represents the result of a cleaning operation
+// CleaningReport представляет результат операции очистки
 type CleaningReport struct {
-	// Deletion statistics
-	DeletedFiles     int   // Number of deleted files
-	DeletedSize      int64 // Actual file size in bytes
-	DeletedBlockSize int64 // Block-aligned size in bytes
-	DeletedDirs      int   // Number of deleted directories
+	// Статистика удаления
+	DeletedFiles     int   // Количество удалённых файлов
+	DeletedSize      int64 // Фактический размер файлов в байтах
+	DeletedBlockSize int64 // Размер с учётом выравнивания по блокам, в байтах
+	DeletedDirs      int   // Количество удалённых директорий
 
-	// Processing time
-	ScanDuration   time.Duration // Time spent scanning files
-	DeleteDuration time.Duration // Time spent deleting files
-	TotalDuration  time.Duration // Total processing time
+	// Время обработки
+	ScanDuration   time.Duration // Время, затраченное на сканирование файлов
+	DeleteDuration time.Duration // Время, затраченное на удаление файлов
+	TotalDuration  time.Duration // Общее время обработки
 
-	// Other information
-	ScannedFiles  int       // Total number of scanned files
-	TimeThreshold time.Time // Time threshold for deletion
-	BlockSize     int64     // File system block size
+	// Прочая информация
+	ScannedFiles  int       // Общее количество отсканированных файлов
+	TimeThreshold time.Time // Временной порог удаления
+	BlockSize     int64     // Размер блока файловой системы
 }

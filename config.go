@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// CleaningConfig represents the configuration for cleaning operations
+// CleaningConfig представляет конфигурацию для операций очистки
 type CleaningConfig struct {
 	// Параметры ёмкости (требуется хотя бы один)
 	// MinFreeSpace — рекомендуемый основной параметр для большинства случаев использования.
@@ -37,7 +37,7 @@ type CleaningConfig struct {
 	// Фактический уровень параллелизма будет равен min(Concurrency, MaxConcurrency).
 	MaxConcurrency int
 
-	// Callbacks
+	// Коллбэки
 	Callbacks Callbacks
 
 	// Внедрение зависимостей
@@ -92,6 +92,8 @@ func (c *CleaningConfig) ActualWorkerCount() int {
 	return workers
 }
 
+// isExcluded сообщает, нужно ли пропустить файл целиком: не учитывать его
+// в размере при сканировании и не удалять при очистке (см. ExcludeExtensions)
 func (c *CleaningConfig) isExcluded(path string) bool {
 	if len(c.excludeExtSet) == 0 {
 		return false

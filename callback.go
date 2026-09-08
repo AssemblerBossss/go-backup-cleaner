@@ -2,7 +2,7 @@ package gobackupcleaner
 
 import "time"
 
-// Callbacks contains callback functions for monitoring the cleaning process
+// Callbacks содержит функции обратного вызова для отслеживания процесса очистки
 type Callbacks struct {
 	OnStart        func(info StartInfo)
 	OnScanComplete func(info ScanCompleteInfo)
@@ -13,29 +13,29 @@ type Callbacks struct {
 	OnError        func(info ErrorInfo)
 }
 
-// StartInfo contains information at the start of cleaning
+// StartInfo содержит информацию на момент начала очистки
 type StartInfo struct {
 	TargetDir    string
 	CurrentUsage DiskUsage
-	TargetSize   int64 // Size to be deleted in bytes
+	TargetSize   int64 // Размер, который нужно удалить, в байтах
 }
 
-// ScanCompleteInfo contains information after file scanning is complete
+// ScanCompleteInfo содержит информацию после завершения сканирования файлов
 type ScanCompleteInfo struct {
 	ScannedFiles  int
 	TotalSize     int64
 	BlockSize     int64
-	TimeThreshold time.Time // Deletion threshold
+	TimeThreshold time.Time // Порог удаления
 	ScanDuration  time.Duration
 }
 
-// DeleteStartInfo contains information at the start of deletion
+// DeleteStartInfo содержит информацию на момент начала удаления
 type DeleteStartInfo struct {
 	EstimatedFiles int
 	EstimatedSize  int64
 }
 
-// FileDeletedInfo contains information about a deleted file
+// FileDeletedInfo содержит информацию об удалённом файле
 type FileDeletedInfo struct {
 	Path      string
 	Size      int64
@@ -43,12 +43,12 @@ type FileDeletedInfo struct {
 	ModTime   time.Time
 }
 
-// DirDeletedInfo contains information about a deleted directory
+// DirDeletedInfo содержит информацию об удалённой директории
 type DirDeletedInfo struct {
 	Path string
 }
 
-// CompleteInfo contains information at the completion of cleaning
+// CompleteInfo содержит информацию на момент завершения очистки
 type CompleteInfo struct {
 	DeletedFiles     int
 	DeletedSize      int64
@@ -57,14 +57,14 @@ type CompleteInfo struct {
 	DeleteDuration   time.Duration
 }
 
-// ErrorInfo contains error information
+// ErrorInfo содержит информацию об ошибке
 type ErrorInfo struct {
 	Type  ErrorType
 	Path  string
 	Error error
 }
 
-// ErrorType represents the type of error
+// ErrorType представляет тип ошибки
 type ErrorType string
 
 const (
@@ -73,9 +73,10 @@ const (
 	ErrorTypeDir    ErrorType = "dir"
 )
 
-// callSafe safely calls a callback function if it's not nil.
-// Generic over the info payload so every OnXxx callback in Callbacks can
-// share one nil-check instead of repeating "if cb != nil { cb(x) }" everywhere.
+// callSafe безопасно вызывает функцию обратного вызова, если она не nil.
+// Обобщён по типу полезной нагрузки info, чтобы все OnXxx-коллбэки в Callbacks
+// использовали одну общую проверку на nil вместо повторения
+// "if cb != nil { cb(x) }" в каждом месте.
 func callSafe[T any](fn func(T), info T) {
 	if fn != nil {
 		fn(info)
