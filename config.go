@@ -19,6 +19,14 @@ type CleaningConfig struct {
 	TimeWindow      time.Duration // Интервал времени для агрегации файлов (по умолчанию: 5 минут)
 	RemoveEmptyDirs bool          // Удалять ли пустые каталоги (по умолчанию: true)
 
+	// MaxAge — альтернативный режим: удалить файлы старше этого возраста,
+	// без учёта состояния диска (взаимоисключим с MinFreeSpace/MaxUsagePercent/MaxSize)
+	MaxAge *time.Duration
+
+	// ExcludeDirs — имена/шаблоны директорий, которые нужно полностью
+	// пропускать при сканировании и удалении, на любой глубине дерева
+	ExcludeDirs []string
+
 	// Cписок расширений файлов, которые НИКОГДА не учитываются при сканировании и никогда не удаляются
 	ExcludeExtensions []string
 
@@ -26,6 +34,10 @@ type CleaningConfig struct {
 	// Строится один раз в setDefaults(), чтобы не гонять по срезу
 	// ExcludeExtensions на каждый файл при сканировании миллионов файлов.
 	excludeExtSet map[string]struct{}
+
+	// excludeDirSet — нормализованный набор шаблонов, строится один раз
+	// в setDefaults(), как и excludeExtSet
+	excludeDirSet map[string]struct{}
 
 	// DryRun — если true, все шаги cleaner'а выполняются как обычно,
 	// но реального os.Remove не происходит. CLI-флаг --dry-run
@@ -70,6 +82,16 @@ func (c *CleaningConfig) setDefaults() {
 		}
 	}
 
+	if len(c.ExcludeDirs) > 0 {
+		c.excludeDirSet = make(map[string]struct{})
+		for _, d := range c.ExcludeDirs {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d != "" {
+				c.excludeDirSet[d] = struct{}{}
+			}
+		}
+	}
+
 	// Устанавливаем параллелизм по умолчанию равным количеству CPU, если не указано
 	if c.Concurrency == 0 {
 		c.Concurrency = runtime.NumCPU()
@@ -107,10 +129,25 @@ func (c *CleaningConfig) isExcluded(path string) bool {
 	return found
 }
 
+// IsExcludedDir isExcludedDir сообщает, нужно ли пропустить директорию целиком (не спускаться внутрь
+// при сканировании/удалении) — сравнение идёт по имени директории (entry.Name()),
+// а не по полному пути, поэтому совпадение срабатывает на любой глубине дерева.
+func (c *CleaningConfig) IsExcludedDir(name string) bool {
+	if len(c.excludeDirSet) == 0 {
+		return false
+	}
+	_, found := c.excludeDirSet[name]
+	return found
+}
+
 // validate проверяет, является ли конфигурация допустимой
 func (c *CleaningConfig) validate() error {
-	if c.MinFreeSpace == nil && c.MaxUsagePercent == nil && c.MaxSize == nil {
+	if c.MinFreeSpace == nil && c.MaxUsagePercent == nil && c.MaxSize == nil && c.MaxAge == nil {
 		return ErrNoCapacitySpecified
+	}
+
+	if c.MaxAge != nil && *c.MaxAge < 0 {
+		return ErrInvalidConfig
 	}
 
 	if c.MinFreeSpace != nil && *c.MinFreeSpace < 0 {
