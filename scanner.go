@@ -24,7 +24,7 @@ type timeSlot struct {
 	totalBlockSize int64
 }
 
-// scanTask представляет задачу для параллельного сканирования
+// Просто обёртка над путём — "задание": "обработай вот этот путь" (файл или папку).
 type scanTask struct {
 	path string
 }
@@ -52,8 +52,8 @@ func newScanner(config *CleaningConfig, blockSize int64) *scanner {
 func (s *scanner) scan(rootPath string) error {
 	taskChan := make(chan scanTask, 100)
 	errChan := make(chan error, s.workerCount)
-	var wg sync.WaitGroup
-	var taskWg sync.WaitGroup
+	var wg sync.WaitGroup     // счётчик "сколько воркеров ещё работают"
+	var taskWg sync.WaitGroup //счётчик "сколько заданий ещё не выполнено"
 
 	// Запускаем рабочие процессы
 	for i := 0; i < s.workerCount; i++ {
@@ -161,8 +161,7 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 
 // addFile добавляет файл в соответствующий временной слот.
 // Файлы никогда не хранятся в одном огромном слайсе — они сразу группируются
-// по времени, округлённому с помощью Truncate(), что ограничивает использование
-// памяти в деревьях с миллионами файлов (см. TimeWindow в config.go).
+// по времени, округлённому с помощью Truncate().
 func (s *scanner) addFile(fi fileInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

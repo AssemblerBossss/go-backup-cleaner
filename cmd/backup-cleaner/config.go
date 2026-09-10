@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	cleaner "github.com/ideamans/go-backup-cleaner"
 )
@@ -20,10 +21,9 @@ type yamlConfig struct {
 	Targets        []yamlTarget `yaml:"targets"`
 }
 
-// yamlTarget — правила очистки для одной директории. Указатели там,
-// где нужно отличать "не задано" от "задано нулём" (например,
-// MaxUsagePercent: 0 — валидное, но бессмысленное значение, поэтому
-// используем *float64, а не float64).
+// yamlTarget — правила очистки для одной директории. Указатели там, где нужно отличать
+// "не задано" от "задано нулём" (например, MaxUsagePercent: 0 — валидное, но
+// бессмысленное значение, поэтому используем *float64, а не float64).
 type yamlTarget struct {
 	Path string `yaml:"path"`
 
@@ -69,7 +69,6 @@ type resolvedTarget struct {
 // их переопределить. Возвращает также список ошибок валидации,
 // которые НЕ прерывают весь запуск — битый target пропускается, чтобы
 // один опечатанный путь не остановил очистку остальных директорий
-// (инструмент рассчитан на запуск из cron без присмотра).
 func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 	globalWindow := 5 * time.Minute
 	if cfg.TimeWindow != "" {

@@ -192,15 +192,35 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 }
 
 // deleteEmptyDirs удаляет пустые директории
-func (d *deleter) deleteEmptyDirs() (int, error) {
+func (d *deleter) deleteEmptyDirs(dirPath string) (int, error) {
 	if !d.config.RemoveEmptyDirs {
 		return 0, nil
 	}
 
-	deletedCount := 0
-	dirs := d.deletedDirs.toSlice()
+	var dirs []string
 
-	// Обрабатываем директории в обратном порядке (сначала самые глубокие)
+	err := filepath.WalkDir(dirPath, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if path == dirPath {
+			//Корень не удаляем
+			return nil
+		}
+		dirs = append(dirs, path)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	deletedCount := 0
 	for i := len(dirs) - 1; i >= 0; i-- {
 		dir := dirs[i]
 		if err := d.deleteEmptyDirRecursive(dir, &deletedCount); err != nil {

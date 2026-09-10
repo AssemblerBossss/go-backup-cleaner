@@ -127,7 +127,7 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 	}
 
 	// Фаза 3: удаление пустых директорий
-	deletedDirs, _ := deleter.deleteEmptyDirs()
+	deletedDirs, _ := deleter.deleteEmptyDirs(dirPath)
 	// Игнорируем ошибку, так как для удаления директорий она не критична
 
 	deleteDuration := time.Since(deleteStartTime)
