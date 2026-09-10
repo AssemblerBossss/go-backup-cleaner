@@ -35,7 +35,10 @@ type yamlTarget struct {
 	RemoveEmptyDirs *bool  `yaml:"remove_empty_dirs"` // *bool, чтобы отличить "не указано" от false
 	DryRun          bool   `yaml:"dry_run"`
 
-	ExcludeExtensions []string `yaml:"exclude_extensions"`
+	MaxAge string `yaml:"max_age"` // "720h", "30d", "4w"
+
+	ExcludeDirs       []string `yaml:"exclude_dirs"`
+	ExcludeExtensions []string `yaml:"exclude_extensions"` // имена директорий, любая глубина
 }
 
 // loadYAMLConfig читает и парсит YAML-файл конфигурации по пути path.

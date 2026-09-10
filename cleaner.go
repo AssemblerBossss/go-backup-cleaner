@@ -15,6 +15,10 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 		return CleaningReport{}, err
 	}
 
+	if config.MaxAge != nil {
+		return cleanByAge(dirPath, config, startTime)
+	}
+
 	// Проверяем, существует ли директория
 	if _, err := os.Stat(dirPath); err != nil {
 		if os.IsNotExist(err) {
@@ -297,4 +301,50 @@ func calculateThresholdForMaxSize(slots []*timeSlot, maxSize int64) (time.Time, 
 		return time.Now().Add(time.Hour), deleteFiles, deleteSize
 	}
 	return time.Time{}, 0, 0
+}
+
+// cleanByAge удаляет файлы старше config.MaxAge, без обращения к состоянию диска —
+// используется, когда задан MaxAge вместо MinFreeSpace/MaxUsagePercent/MaxSize.
+func cleanByAge(dirPath string, config CleaningConfig, startTime time.Time) (CleaningReport, error) {
+	blockSize, err := config.DiskInfo.GetBlockSize(dirPath)
+	if err != nil {
+		return CleaningReport{}, err
+	}
+
+	threshold := time.Now().Add(-*config.MaxAge)
+
+	callSafe(config.Callbacks.OnStart, StartInfo{
+		TargetDir: dirPath,
+		// CurrentUsage не заполняется — в age-режиме состояние диска не опрашивается
+	})
+
+	deleteStartTime := time.Now()
+	d := newDeleter(&config, blockSize)
+	if err := d.deleteFiles(dirPath, threshold); err != nil {
+		return CleaningReport{}, err
+	}
+
+	deletedDirs, _ := d.deleteEmptyDirs(dirPath)
+	deleteDuration := time.Since(deleteStartTime)
+	deletedFiles, deletedSize, deletedBlocks := d.getStats()
+
+	callSafe(config.Callbacks.OnComplete, CompleteInfo{
+		DeletedFiles:     deletedFiles,
+		DeletedSize:      deletedSize,
+		DeletedBlockSize: deletedBlocks,
+		DeletedDirs:      deletedDirs,
+		DeleteDuration:   deleteDuration,
+	})
+
+	return CleaningReport{
+		DeletedFiles:     deletedFiles,
+		DeletedSize:      deletedSize,
+		DeletedBlockSize: deletedBlocks,
+		DeletedDirs:      deletedDirs,
+		DeleteDuration:   deleteDuration,
+		TotalDuration:    time.Since(startTime),
+		TimeThreshold:    threshold,
+		BlockSize:        blockSize,
+		// ScanDuration/ScannedFiles остаются нулевыми — фазы сканирования нет
+	}, nil
 }
