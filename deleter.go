@@ -131,6 +131,9 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 	}
 
 	if info.IsDir() {
+		if d.config.IsExcludedDir(info.Name()) {
+			return nil
+		}
 		entries, err := os.ReadDir(path)
 		if err != nil {
 			return err
@@ -153,7 +156,9 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 				}
 			}
 		}
-	} else if info.Mode().IsRegular() && info.ModTime().Before(threshold) && !d.config.isExcluded(path) {
+	} else if info.Mode().IsRegular() &&
+		info.ModTime().Before(threshold) &&
+		!d.config.isExcluded(path) {
 		size := info.Size()
 		blockSize := calculateBlockSize(size, d.blockSize)
 

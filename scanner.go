@@ -119,6 +119,9 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 	}
 
 	if info.IsDir() {
+		if s.config.IsExcludedDir(info.Name()) {
+			return nil // вся поддиректория пропускается, включая её содержимое
+		}
 		entries, err := os.ReadDir(path)
 		if err != nil {
 			return err
