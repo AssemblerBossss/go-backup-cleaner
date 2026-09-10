@@ -19,3 +19,8 @@ targets:
   - path: /mnt/backups/site-c
     max_size_gb: 500               # суммарный размер не более 500 ГБ
     dry_run: true                  # только показать, что было бы удалено
+
+  - path: /mnt/backups/logs
+    max_age: 30d
+    exclude_dirs: [ archive, .git ]        # пропускать на любой глубине
+    exclude_extensions: [ .lock, .keep ]

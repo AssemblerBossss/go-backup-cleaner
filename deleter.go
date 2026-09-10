@@ -222,7 +222,7 @@ func (d *deleter) deleteEmptyDirs(dirPath string) (int, error) {
 	deletedCount := 0
 	for i := len(dirs) - 1; i >= 0; i-- {
 		dir := dirs[i]
-		if err := d.deleteEmptyDirRecursive(dir, &deletedCount); err != nil {
+		if err := d.deleteEmptyDirRecursive(dir, dirPath, &deletedCount); err != nil {
 			if d.config.Callbacks.OnError != nil {
 				d.config.Callbacks.OnError(ErrorInfo{
 					Type:  ErrorTypeDir,
@@ -236,13 +236,18 @@ func (d *deleter) deleteEmptyDirs(dirPath string) (int, error) {
 	return deletedCount, nil
 }
 
-// deleteEmptyDirRecursive рекурсивно удаляет пустые директории.
-// Стартует только с директорий, из которых реально был удалён файл
-// (см. deletedDirs), затем идёт вверх по дереву: удаление директории может
-// сделать пустой и её родителя, поэтому после каждого успешного удаления
-// делается попытка удалить директорию уровнем выше, пока не встретится
-// непустая директория (или корень/".").
-func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
+// deleteEmptyDirRecursive рекурсивно удаляет пустые директории вверх по
+// дереву: удаление директории может сделать пустой и её родителя, поэтому
+// после каждого успешного удаления делается попытка удалить директорию
+// уровнем выше, пока не встретится непустая директория, "." / "/", либо
+// сам rootPath — корень target НИКОГДА не удаляется, даже если восхождение
+// снизу дошло до него (без этой проверки удаление, начатое из глубокой
+// поддиректории, могло дойти до rootPath и стереть сам target).
+func (d *deleter) deleteEmptyDirRecursive(dir string, rootPath string, deletedCount *int) error {
+	if dir == rootPath {
+		return nil
+	}
+
 	// Проверяем, пуста ли директория
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -272,7 +277,7 @@ func (d *deleter) deleteEmptyDirRecursive(dir string, deletedCount *int) error {
 		// Пробуем удалить родительскую директорию
 		parent := filepath.Dir(dir)
 		if parent != dir && parent != "." && parent != "/" {
-			return d.deleteEmptyDirRecursive(parent, deletedCount)
+			return d.deleteEmptyDirRecursive(parent, rootPath, deletedCount)
 		}
 	}
 
