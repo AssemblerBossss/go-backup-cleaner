@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -35,10 +38,10 @@ type yamlTarget struct {
 	RemoveEmptyDirs *bool  `yaml:"remove_empty_dirs"` // *bool, чтобы отличить "не указано" от false
 	DryRun          bool   `yaml:"dry_run"`
 
-	MaxAge string `yaml:"max_age"` // "720h", "30d", "4w"
+	MaxAge string `yaml:"max_age"` // "720h", "30d", "4w" — взаимоисключимо с capacity-полями выше
 
-	ExcludeDirs       []string `yaml:"exclude_dirs"`
-	ExcludeExtensions []string `yaml:"exclude_extensions"` // имена директорий, любая глубина
+	ExcludeDirs       []string `yaml:"exclude_dirs"`       // имена директорий, пропускаются на любой глубине
+	ExcludeExtensions []string `yaml:"exclude_extensions"` // расширения файлов, никогда не трогаются
 }
 
 // loadYAMLConfig читает и парсит YAML-файл конфигурации по пути path.
@@ -60,6 +63,38 @@ func loadYAMLConfig(path string) (*yamlConfig, error) {
 	return &cfg, nil
 }
 
+// flexibleDurationPattern ловит число (целое или дробное) со суффиксом
+// d (дни) или w (недели) — единственное, чего не хватает time.ParseDuration.
+var flexibleDurationPattern = regexp.MustCompile(`^(-?\d+(?:\.\d+)?)(d|w)$`)
+
+// parseFlexibleDuration расширяет time.ParseDuration поддержкой суффиксов
+// d (дни) и w (недели) — их нет в стандартной библиотеке. "Месяцы" сознательно
+// не поддерживаются: месяц — величина переменной длины (28-31 день), явная
+// неоднозначность; вместо max_age: "1mo" нужно писать max_age: "30d" и
+// понимать, что это приближение.
+func parseFlexibleDuration(s string) (time.Duration, error) {
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+
+	m := flexibleDurationPattern.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0, fmt.Errorf("не удалось распознать длительность %q (формат time.ParseDuration, например 720h, либо число с суффиксом d/w, например 30d, 4w)", s)
+	}
+
+	n, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("не удалось распознать длительность %q: %w", s, err)
+	}
+
+	unit := 24 * time.Hour
+	if m[2] == "w" {
+		unit *= 7
+	}
+
+	return time.Duration(n * float64(unit)), nil
+}
+
 // resolvedTarget — то, что реально пойдёт в cleaner.CleanBackup:
 // путь к директории + готовый CleaningConfig.
 type resolvedTarget struct {
@@ -75,7 +110,7 @@ type resolvedTarget struct {
 func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 	globalWindow := 5 * time.Minute
 	if cfg.TimeWindow != "" {
-		if d, err := time.ParseDuration(cfg.TimeWindow); err == nil {
+		if d, err := parseFlexibleDuration(cfg.TimeWindow); err == nil {
 			globalWindow = d
 		}
 	}
@@ -97,7 +132,7 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 
 		window := globalWindow
 		if t.TimeWindow != "" {
-			if d, err := time.ParseDuration(t.TimeWindow); err == nil {
+			if d, err := parseFlexibleDuration(t.TimeWindow); err == nil {
 				window = d
 			} else {
 				errs = append(errs, fmt.Errorf("targets[%d] (%s): некорректный time_window: %v", i, t.Path, err))
@@ -109,14 +144,35 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 			removeEmptyDirs = *t.RemoveEmptyDirs
 		}
 
+		// max_age — отдельный режим (очистка по возрасту, без обращения к диску),
+		// взаимоисключимый с capacity-полями. Проверяем на уровне YAML сразу,
+		// с понятной ошибкой и номером target, не дожидаясь validate() в библиотеке.
+		hasCapacityField := t.MinFreeSpaceGB != nil || t.MaxUsagePercent != nil || t.MaxSizeGB != nil
+		if t.MaxAge != "" && hasCapacityField {
+			errs = append(errs, fmt.Errorf("targets[%d] (%s): max_age нельзя сочетать с min_free_space_gb / max_usage_percent / max_size_gb — это взаимоисключающие режимы", i, t.Path))
+			continue
+		}
+
+		var maxAge *time.Duration
+		if t.MaxAge != "" {
+			d, err := parseFlexibleDuration(t.MaxAge)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("targets[%d] (%s): некорректный max_age: %v", i, t.Path, err))
+				continue
+			}
+			maxAge = &d
+		}
+
 		conf := cleaner.CleaningConfig{
 			MaxUsagePercent:   t.MaxUsagePercent,
+			MaxAge:            maxAge,
 			TimeWindow:        window,
 			RemoveEmptyDirs:   removeEmptyDirs,
 			Concurrency:       cfg.Concurrency,
 			MaxConcurrency:    cfg.MaxConcurrency,
 			DryRun:            t.DryRun,
 			ExcludeExtensions: t.ExcludeExtensions,
+			ExcludeDirs:       t.ExcludeDirs,
 		}
 
 		// GB -> байты переводим тут, а не в CleaningConfig — библиотека
@@ -131,8 +187,8 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 			conf.MaxSize = &bytes
 		}
 
-		if conf.MinFreeSpace == nil && conf.MaxUsagePercent == nil && conf.MaxSize == nil {
-			errs = append(errs, fmt.Errorf("targets[%d] (%s): не задано ни одно из min_free_space_gb / max_usage_percent / max_size_gb", i, t.Path))
+		if conf.MinFreeSpace == nil && conf.MaxUsagePercent == nil && conf.MaxSize == nil && conf.MaxAge == nil {
+			errs = append(errs, fmt.Errorf("targets[%d] (%s): не задано ни одно из min_free_space_gb / max_usage_percent / max_size_gb / max_age", i, t.Path))
 			continue
 		}
 
