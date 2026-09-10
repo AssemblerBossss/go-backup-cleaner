@@ -153,13 +153,7 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 				}
 			}
 		}
-	} else if info.Mode().IsRegular() && info.ModTime().Before(threshold) {
-		// Удаляем файл, если он старше threshold.
-		// Это самостоятельный, заново выполняемый обход на основе Lstat,
-		// независимый от карты timeSlots сканера — deleter никогда не хранит
-		// в памяти список файлов из фазы 1, он просто заново обходит дерево
-		// и заново проверяет ModTime каждого файла относительно единого
-		// threshold, вычисленного в cleaner.go.
+	} else if info.Mode().IsRegular() && info.ModTime().Before(threshold) && !d.config.isExcluded(path) {
 		size := info.Size()
 		blockSize := calculateBlockSize(size, d.blockSize)
 
