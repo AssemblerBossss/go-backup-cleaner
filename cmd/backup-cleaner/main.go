@@ -74,6 +74,29 @@ func main() {
 // нескольких директорий за один запуск было понятно, где что удаляется.
 func attachVerboseCallbacks(cfg *cleaner.CleaningConfig, targetPath string) {
 	cfg.Callbacks = cleaner.Callbacks{
+		OnStart: func(info cleaner.StartInfo) {
+			fmt.Printf("[%s] старт очистки\n", targetPath)
+
+			if info.CurrentUsage.Total > 0 {
+				fmt.Printf("[%s] диск: %.1f%% занято (%s из %s), цель: освободить %s\n",
+					targetPath,
+					info.CurrentUsage.UsedPercent,
+					formatBytes(int64(info.CurrentUsage.Used)),
+					formatBytes(int64(info.CurrentUsage.Total)),
+					formatBytes(info.TargetSize))
+			}
+		},
+
+		OnScanComplete: func(info cleaner.ScanCompleteInfo) {
+			// В age-режиме фазы сканирования нет вообще (cleanByAge не
+			// вызывает scanner), поэтому этот коллбэк для таких targets
+			// не сработает — это ожидаемо, не баг.
+			fmt.Printf("[%s] сканирование завершено: файлов %d, всего %s\n",
+				targetPath, info.ScannedFiles, formatBytes(info.TotalSize))
+			fmt.Printf("[%s] будут удалены файлы старше: %s\n",
+				targetPath, info.TimeThreshold.Format("2006-01-02 15:04:05"))
+		},
+
 		OnFileDeleted: func(info cleaner.FileDeletedInfo) {
 			verb := "удалён"
 			if cfg.DryRun {
