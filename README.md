@@ -1,165 +1,92 @@
 # go-backup-cleaner
 
-English | [日本語](README.ja.md)
+Go-пакет для автоматической очистки старых бэкапов: удаляет самые старые файлы в указанной директории, пока не будет достигнуто одно из заданных ограничений (свободное место, процент занятости диска, максимальный размер каталога или максимальный возраст файлов).
 
-[![Test](https://github.com/ideamans/go-backup-cleaner/actions/workflows/test.yml/badge.svg)](https://github.com/ideamans/go-backup-cleaner/actions/workflows/test.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/ideamans/go-backup-cleaner.svg)](https://pkg.go.dev/github.com/ideamans/go-backup-cleaner)
+## Возможности
 
-A Go package designed to efficiently maintain disk free space by removing old backup files from large file collections. It ensures a specified amount of free disk space is always available by intelligently deleting the oldest backup files when storage capacity limits are reached.
+- Поддерживает нужный объём свободного места, удаляя старые файлы
+- Работает с миллионами файлов благодаря агрегации по временным окнам вместо хранения списка файлов целиком в памяти
+- Параллельное сканирование и удаление
+- Удаляет сначала самые старые файлы, сохраняя недавние бэкапы
+- Учитывает размер блока файловой системы при расчёте реально освобождаемого места
+- Несколько взаимоисключающих режимов ограничения: `MinFreeSpace`, `MaxUsagePercent`, `MaxSize`, `MaxAge`
+- Исключения по расширениям файлов и по именам директорий
+- Коллбэки для отслеживания хода очистки
+- Режим `DryRun` — прогон без реального удаления
+- Кроссплатформенность: Linux, macOS, Windows
 
-## Features
-
-- **Efficient disk space management** - Maintains specified free space by removing old backups
-- **Optimized for large file collections** - Handles millions of files with memory-efficient algorithms
-- **Parallel processing** - Concurrent file scanning and deletion for maximum performance
-- **Smart deletion** - Deletes oldest files first to preserve recent backups
-- **Block-size aware** - Accurately calculates actual disk space that will be freed
-- **Flexible constraints** - MinFreeSpace (recommended), MaxUsagePercent, or MaxSize
-- **Progress monitoring** - Real-time callbacks for tracking operations
-- **Cross-platform** - Works on Linux, macOS, and Windows
-
-## Installation
+## Установка
 
 ```bash
 go get github.com/ideamans/go-backup-cleaner
 ```
 
-## Usage
+## Параметры конфигурации (`CleaningConfig`)
+
+### Режим ограничения (обязателен ровно один из вариантов)
+
+- `MinFreeSpace` (*int64, байты) — рекомендуемый вариант: держать не менее указанного объёма свободного места
+- `MaxUsagePercent` (*float64, 0-100) — не превышать указанный процент занятости диска
+- `MaxSize` (*int64, байты) — не превышать указанный размер каталога; используется, когда информация о диске недоступна (сетевые тома, ограничения прав)
+- `MaxAge` (*time.Duration) — удалять файлы старше указанного возраста, без обращения к состоянию диска
+
+`MaxUsagePercent` и `MinFreeSpace` требуют доступа к статистике диска (statfs/df) и не работают там, где она недоступна — в этом случае используйте `MaxSize` или `MaxAge`.
+
+### Дополнительные настройки
+
+- `TimeWindow` — интервал агрегации файлов по времени (по умолчанию 5 минут)
+- `RemoveEmptyDirs` — удалять опустевшие директории (по умолчанию `true`)
+- `MinTriggerSize` (*int64, байты) — только вместе с `MaxAge`: запускать удаление по возрасту, лишь если суммарный размер директории превышает это значение
+- `ExcludeDirs` — имена директорий, полностью пропускаемые на любой глубине дерева
+- `ExcludeExtensions` — расширения файлов, которые никогда не сканируются и не удаляются
+- `DryRun` — выполнить все шаги, но не удалять файлы физически
+- `Concurrency` — желаемый уровень параллелизма (по умолчанию `runtime.NumCPU()`)
+- `MaxConcurrency` — верхний предел параллелизма (по умолчанию 4 — по бенчмаркам, дальше упирается в I/O диска)
+
+Фактическое число воркеров = `min(Concurrency, MaxConcurrency)`, доступно через `config.ActualWorkerCount()`.
+
+### Учёт размера блока
+
+Файл занимает на диске место кратно размеру блока файловой системы, а не свой фактический размер (например, файл 1КБ на ФС с блоком 4КБ займёт 4КБ). Пакет учитывает это при расчёте, сколько места реально освободится.
+
+### Коллбэки
+
+- `OnStart` — старт очистки
+- `OnScanComplete` — сканирование завершено
+- `OnDeleteStart` — перед началом удаления
+- `OnFileDeleted` — на каждый удалённый файл
+- `OnDirDeleted` — на каждую удалённую директорию
+- `OnComplete` — очистка завершена
+- `OnError` — некритичная ошибка (не останавливает процесс)
+
+## Как это работает
+
+1. Считает, сколько места нужно освободить, исходя из выбранного ограничения (для `MaxAge` этот шаг пропускается)
+2. Сканирует директорию, группируя файлы по временным окнам (без хранения полного списка файлов в памяти)
+3. Определяет временной порог: файлы старше него подлежат удалению
+4. Параллельно удаляет файлы старше порога, начиная с самых старых
+5. Удаляет опустевшие директории (если `RemoveEmptyDirs: true`)
+
+Важно: сканируется и очищается только поддерево внутри переданного пути — не весь диск. Статистика диска (`Free`/`Used`/`Total`) используется только для расчёта целевого объёма удаления.
+
+### Проверка свободного места без полного запуска
 
 ```go
-package main
-
-import (
-    "log"
-    cleaner "github.com/ideamans/go-backup-cleaner"
-)
-
-func main() {
-    // Set minimum free space requirement (recommended approach)
-    minFree := int64(10 * 1024 * 1024 * 1024) // 10GB
-    config := cleaner.CleaningConfig{
-        MinFreeSpace:    &minFree,
-        RemoveEmptyDirs: true,
-        Callbacks: cleaner.Callbacks{
-            OnFileDeleted: func(info cleaner.FileDeletedInfo) {
-                log.Printf("Deleted: %s (%d bytes)", info.Path, info.Size)
-            },
-        },
-    }
-
-    report, err := cleaner.CleanBackup("/path/to/backup", config)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    log.Printf("Deleted %d files, freed %d bytes in %v",
-        report.DeletedFiles, report.DeletedSize, report.TotalDuration)
-}
-```
-
-## Configuration Options
-
-### Capacity Constraints (at least one required)
-
-- `MinFreeSpace`: Minimum free space in bytes (recommended primary option)
-- `MaxUsagePercent`: Maximum disk usage percentage (0-100)
-- `MaxSize`: Maximum total size in bytes (alternative when disk info is unavailable)
-
-### Optional Settings
-
-- `TimeWindow`: Time interval for file aggregation (default: 5 minutes)
-- `RemoveEmptyDirs`: Whether to remove empty directories (default: true)
-- `Concurrency`: Level of concurrency (default: runtime.NumCPU())
-- `MaxConcurrency`: Maximum level of concurrency (default: 4)
-
-#### Concurrency Settings
-
-The package uses parallel processing for scanning and deleting files. You can control the level of parallelism:
-
-- `Concurrency`: Specifies the desired level of concurrency. If set to 0, it defaults to the number of CPU cores.
-- `MaxConcurrency`: Limits the maximum level of concurrency. Defaults to 4.
-- The actual concurrency can be obtained via `config.ActualWorkerCount()`, which returns `min(Concurrency, MaxConcurrency)`.
-
-The reason for limiting `MaxConcurrency` to 4:
-
-- Benchmarks show diminishing returns beyond 4 parallel workers
-- Disk I/O becomes the bottleneck, making excessive parallelization ineffective
-- This value provides optimal resource utilization for most systems
-
-#### Block Size
-
-The cleaner considers "block size" when calculating disk space. Block size refers to the minimum allocation unit used by the file system. When a file is stored on disk, it occupies space in multiples of the block size, even if the actual file size is smaller. For example:
-
-- A 1KB file on a file system with 4KB blocks will actually use 4KB of disk space
-- A 5KB file on the same system will use 8KB (2 blocks)
-
-This package accurately tracks both the file size and the actual disk space that will be freed when files are deleted, ensuring precise capacity management.
-
-### Callbacks
-
-Monitor the cleaning process with callbacks:
-
-- `OnStart`: Called when cleaning starts
-- `OnScanComplete`: Called after file scanning completes
-- `OnDeleteStart`: Called before deletion begins
-- `OnFileDeleted`: Called for each deleted file
-- `OnDirDeleted`: Called for each deleted directory
-- `OnComplete`: Called when cleaning completes
-- `OnError`: Called on non-fatal errors
-
-## How It Works
-
-1. **Scans** the backup directory to catalog all files
-2. **Calculates** how much space needs to be freed based on constraints
-3. **Determines** a time threshold - files older than this will be deleted
-4. **Deletes** files in parallel, starting with the oldest
-5. **Cleans up** empty directories (if enabled)
-
-### Checking Disk Space Before Cleanup
-
-The package provides a convenience function `GetDiskFreeSpace` to quickly check available disk space before performing cleanup operations:
-
-```go
-// Check if cleanup is needed before running the full operation
 freeSpace, err := cleaner.GetDiskFreeSpace("/path/to/backup")
 if err != nil {
     log.Fatal(err)
 }
 
-// Only run cleanup if free space is below threshold
 if freeSpace < requiredFreeSpace {
     report, err := cleaner.CleanBackup("/path/to/backup", config)
     // ...
 }
 ```
 
-This allows for efficient pre-checks to avoid unnecessary file scanning when disk space is already sufficient.
-
-### Choosing the Right Capacity Constraint
-
-**MinFreeSpace (Recommended)**: This is the most straightforward and recommended option for most use cases. It ensures a specific amount of free disk space is always available, which is typically what backup systems need to guarantee successful operation.
-
-**MaxUsagePercent**: Useful when you want to maintain a percentage-based disk usage policy across different sized volumes.
-
-**MaxSize**: Best used as a fallback option when disk usage information is not available (e.g., due to permissions or OS limitations). In this mode, the cleaner will delete old files until the total size is under the specified limit. This is useful for:
-
-- Environments with restricted disk access
-- Network storage where disk usage APIs are not available
-- Simplified quota-based cleanup
-
-Note: `MaxUsagePercent` and `MinFreeSpace` require disk usage information and cannot be used when disk usage is unavailable.
-
-## Testing
-
-Run tests:
+## Тесты
 
 ```bash
 go test -v ./...
-```
-
-Run tests with coverage:
-
-```bash
 go test -v -cover ./...
 ```
 
@@ -171,20 +98,20 @@ go test -v -cover ./...
 go build -o backup-cleaner ./cmd/backup-cleaner
 ```
 
-Запуск по YAML-конфигу (см. config.example.yaml):
+Запуск по YAML-конфигу (пример конфига со всеми режимами — `config.yaml`):
 
 ```bash
 ./backup-cleaner -config config.yaml -verbose
 ```
 
-Принудительный dry-run для всех targets сразу, независимо от того,
-что указано в самом YAML:
+Принудительный dry-run для всех targets сразу, независимо от того, что указано в самом YAML:
 
 ```bash
 ./backup-cleaner -config config.yaml -dry-run -verbose
 ```
 
+Каждый target в YAML-конфиге — независимая директория со своим набором правил (см. комментарии в `config.yaml`).
 
-## License
+## Лицензия
 
-MIT License - see LICENSE file for details.
+MIT License — см. файл LICENSE.

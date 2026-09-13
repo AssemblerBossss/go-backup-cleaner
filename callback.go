@@ -64,7 +64,6 @@ type ErrorInfo struct {
 	Error error
 }
 
-// ErrorType представляет тип ошибки
 type ErrorType string
 
 const (
@@ -74,9 +73,6 @@ const (
 )
 
 // callSafe безопасно вызывает функцию обратного вызова, если она не nil.
-// Обобщён по типу полезной нагрузки info, чтобы все OnXxx-коллбэки в Callbacks
-// использовали одну общую проверку на nil вместо повторения
-// "if cb != nil { cb(x) }" в каждом месте.
 func callSafe[T any](fn func(T), info T) {
 	if fn != nil {
 		fn(info)

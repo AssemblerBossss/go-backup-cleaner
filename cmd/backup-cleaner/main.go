@@ -26,8 +26,7 @@ func main() {
 
 	targets, errs := buildTargets(cfg)
 	for _, e := range errs {
-		// Ошибка валидации отдельного target не останавливает весь
-		// запуск — только сообщается и пропускается (см. buildTargets).
+		// Ошибка валидации отдельного target не останавливает весь запуск — только сообщается.
 		log.Printf("пропуск target: %v", e)
 	}
 	if len(targets) == 0 {
