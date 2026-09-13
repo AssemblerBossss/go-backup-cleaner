@@ -95,12 +95,10 @@ func (c *CleaningConfig) setDefaults() {
 	}
 }
 
-// ActualWorkerCount возвращает фактическое количество рабочих процессов, которое будет использовано
+// ActualWorkerCount возвращает фактическое количество рабочих процессов
 func (c *CleaningConfig) ActualWorkerCount() int {
 	workers := c.Concurrency
-	if workers > c.MaxConcurrency {
-		workers = c.MaxConcurrency
-	}
+	workers = min(workers, c.MaxConcurrency)
 	return workers
 }
 

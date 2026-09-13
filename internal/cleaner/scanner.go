@@ -55,7 +55,6 @@ func (s *scanner) scan(rootPath string) error {
 	var wg sync.WaitGroup     // счётчик "сколько воркеров ещё работают"
 	var taskWg sync.WaitGroup //счётчик "сколько заданий ещё не выполнено"
 
-	// Запускаем рабочие процессы
 	for i := 0; i < s.workerCount; i++ {
 		wg.Add(1)
 		go s.worker(taskChan, errChan, &wg, &taskWg)
@@ -145,7 +144,6 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 			}
 		}
 	} else if info.Mode().IsRegular() {
-		//Обработка обычного файла
 		if s.config.isExcluded(path) {
 			return nil
 		}
@@ -163,8 +161,7 @@ func (s *scanner) processPath(path string, taskChan chan scanTask, taskWg *sync.
 }
 
 // addFile добавляет файл в соответствующий временной слот.
-// Файлы никогда не хранятся в одном огромном слайсе — они сразу группируются
-// по времени, округлённому с помощью Truncate().
+// Файлы группируются по времени, округлённому с помощью Truncate().
 func (s *scanner) addFile(fi fileInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
