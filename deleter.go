@@ -7,37 +7,11 @@ import (
 	"time"
 )
 
-// deletedDirs отслеживает директории, из которых были удалены файлы
-type deletedDirs struct {
-	mu   sync.Mutex
-	dirs map[string]struct{}
-}
-
-// add добавляет директорию в набор
-func (d *deletedDirs) add(dir string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.dirs[dir] = struct{}{}
-}
-
-// toSlice возвращает все директории в виде среза
-func (d *deletedDirs) toSlice() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	dirs := make([]string, 0, len(d.dirs))
-	for dir := range d.dirs {
-		dirs = append(dirs, dir)
-	}
-	return dirs
-}
-
 // deleter управляет операциями удаления файлов
 type deleter struct {
 	config        *CleaningConfig
 	blockSize     int64
 	workerCount   int
-	deletedDirs   *deletedDirs
 	mu            sync.Mutex
 	deletedFiles  int
 	deletedSize   int64
@@ -50,9 +24,6 @@ func newDeleter(config *CleaningConfig, blockSize int64) *deleter {
 		config:      config,
 		blockSize:   blockSize,
 		workerCount: config.ActualWorkerCount(),
-		deletedDirs: &deletedDirs{
-			dirs: make(map[string]struct{}),
-		},
 	}
 }
 
@@ -174,9 +145,6 @@ func (d *deleter) processPath(path string, taskChan chan scanTask, threshold tim
 		d.deletedSize += size
 		d.deletedBlocks += blockSize
 		d.mu.Unlock()
-
-		// Запоминаем родительскую директорию
-		d.deletedDirs.add(filepath.Dir(path))
 
 		// Вызываем коллбэк
 		callSafe(d.config.Callbacks.OnFileDeleted, FileDeletedInfo{

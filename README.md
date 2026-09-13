@@ -69,20 +69,6 @@ go get github.com/ideamans/go-backup-cleaner
 
 Важно: сканируется и очищается только поддерево внутри переданного пути — не весь диск. Статистика диска (`Free`/`Used`/`Total`) используется только для расчёта целевого объёма удаления.
 
-### Проверка свободного места без полного запуска
-
-```go
-freeSpace, err := cleaner.GetDiskFreeSpace("/path/to/backup")
-if err != nil {
-    log.Fatal(err)
-}
-
-if freeSpace < requiredFreeSpace {
-    report, err := cleaner.CleanBackup("/path/to/backup", config)
-    // ...
-}
-```
-
 ## Тесты
 
 ```bash
