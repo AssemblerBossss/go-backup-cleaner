@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	cleaner "github.com/ideamans/go-backup-cleaner"
+	"github.com/ideamans/go-backup-cleaner/internal/cleaner"
 )
 
 // yamlConfig — корневая структура YAML-файла конфигурации.

@@ -1,4 +1,4 @@
-package gobackupcleaner
+package cleaner
 
 // DiskUsage представляет информацию об использовании диска
 type DiskUsage struct {

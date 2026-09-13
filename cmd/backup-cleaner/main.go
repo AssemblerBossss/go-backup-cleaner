@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	cleaner "github.com/ideamans/go-backup-cleaner"
+	"github.com/ideamans/go-backup-cleaner/internal/cleaner"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-package gobackupcleaner
+package cleaner
 
 import (
 	"fmt"
