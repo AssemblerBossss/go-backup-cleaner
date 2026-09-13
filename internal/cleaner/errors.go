@@ -11,7 +11,4 @@ var (
 
 	// ErrDirectoryNotFound возвращается, если целевая директория не найдена
 	ErrDirectoryNotFound = errors.New("directory not found")
-
-	// ErrInsufficientSpace возвращается, если не удалось освободить достаточно места
-	ErrInsufficientSpace = errors.New("cannot free enough space")
 )

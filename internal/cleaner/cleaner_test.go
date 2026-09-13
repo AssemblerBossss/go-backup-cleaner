@@ -401,7 +401,7 @@ func float64Ptr(v float64) *float64 {
 // mockDiskInfoProvider — mock-реализация для тестов
 type mockDiskInfoProvider struct{}
 
-func (m *mockDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
+func (m *mockDiskInfoProvider) GetDiskUsage(_ string) (*DiskUsage, error) {
 	return &DiskUsage{
 		Total:       10 * 1024 * 1024 * 1024, // 10GB
 		Used:        8 * 1024 * 1024 * 1024,  // 8GB - высокая загрузка, чтобы спровоцировать очистку
@@ -410,18 +410,18 @@ func (m *mockDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
 	}, nil
 }
 
-func (m *mockDiskInfoProvider) GetBlockSize(path string) (int64, error) {
+func (m *mockDiskInfoProvider) GetBlockSize(_ string) (int64, error) {
 	return 4096, nil
 }
 
 // failingDiskInfoProvider имитирует сбой при получении данных об использовании диска
 type failingDiskInfoProvider struct{}
 
-func (f *failingDiskInfoProvider) GetDiskUsage(path string) (*DiskUsage, error) {
+func (f *failingDiskInfoProvider) GetDiskUsage(_ string) (*DiskUsage, error) {
 	return nil, fmt.Errorf("disk usage not available")
 }
 
-func (f *failingDiskInfoProvider) GetBlockSize(path string) (int64, error) {
+func (f *failingDiskInfoProvider) GetBlockSize(_ string) (int64, error) {
 	return 4096, nil
 }
 

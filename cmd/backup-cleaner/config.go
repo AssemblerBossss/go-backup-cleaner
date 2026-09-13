@@ -65,7 +65,7 @@ func loadYAMLConfig(path string) (*yamlConfig, error) {
 
 // flexibleDurationPattern ловит число (целое или дробное) со суффиксом
 // d (дни) или w (недели) — единственное, чего не хватает time.ParseDuration.
-var flexibleDurationPattern = regexp.MustCompile(`^(-?\d+(?:\.\d+)?)(d|w)$`)
+var flexibleDurationPattern = regexp.MustCompile(`^(-?\d+(?:\.\d+)?)([dw])$`)
 
 // parseFlexibleDuration расширяет time.ParseDuration поддержкой суффиксов
 // d (дни) и w (недели) — их нет в стандартной библиотеке. "Месяцы" сознательно

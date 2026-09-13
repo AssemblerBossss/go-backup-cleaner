@@ -70,13 +70,6 @@ func TestConfigConcurrencyDefaults(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // TestConfigTimeWindowDefault тестирует значение TimeWindow по умолчанию
 func TestConfigTimeWindowDefault(t *testing.T) {
 	config := CleaningConfig{}
