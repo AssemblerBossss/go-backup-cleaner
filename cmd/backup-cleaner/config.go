@@ -38,7 +38,8 @@ type yamlTarget struct {
 	RemoveEmptyDirs *bool  `yaml:"remove_empty_dirs"` // *bool, чтобы отличить "не указано" от false
 	DryRun          bool   `yaml:"dry_run"`
 
-	MaxAge string `yaml:"max_age"` // "720h", "30d", "4w" — взаимоисключимо с capacity-полями выше
+	MaxAge           string   `yaml:"max_age"`             // "720h", "30d", "4w" — взаимоисключимо с capacity-полями выше
+	AgeTriggerSizeGB *float64 `yaml:"age_trigger_size_gb"` // запускать max_age, только если папка весит больше этого
 
 	ExcludeDirs       []string `yaml:"exclude_dirs"`       // имена директорий, пропускаются на любой глубине
 	ExcludeExtensions []string `yaml:"exclude_extensions"` // расширения файлов, никогда не трогаются
@@ -163,6 +164,10 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 			maxAge = &d
 		}
 
+		if t.AgeTriggerSizeGB != nil && t.MaxAge == "" {
+			errs = append(errs, fmt.Errorf("targets[%d] (%s): age_trigger_size_gb имеет смысл только вместе с max_age", i, t.Path))
+		}
+
 		conf := cleaner.CleaningConfig{
 			MaxUsagePercent:   t.MaxUsagePercent,
 			MaxAge:            maxAge,
@@ -175,9 +180,7 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 			ExcludeDirs:       t.ExcludeDirs,
 		}
 
-		// GB -> байты переводим тут, а не в CleaningConfig — библиотека
-		// работает в байтах, GB — удобство только для человека,
-		// читающего YAML.
+		// GB -> байты переводим тут
 		if t.MinFreeSpaceGB != nil {
 			bytes := *t.MinFreeSpaceGB * 1024 * 1024 * 1024
 			conf.MinFreeSpace = &bytes
@@ -185,6 +188,10 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 		if t.MaxSizeGB != nil {
 			bytes := *t.MaxSizeGB * 1024 * 1024 * 1024
 			conf.MaxSize = &bytes
+		}
+		if t.AgeTriggerSizeGB != nil {
+			bytes := int64(*t.AgeTriggerSizeGB * 1024 * 1024 * 1024)
+			conf.MinTriggerSize = &bytes
 		}
 
 		if conf.MinFreeSpace == nil && conf.MaxUsagePercent == nil && conf.MaxSize == nil && conf.MaxAge == nil {
