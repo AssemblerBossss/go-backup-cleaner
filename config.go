@@ -7,10 +7,8 @@ import (
 	"time"
 )
 
-// CleaningConfig представляет конфигурацию для операций очистки
 type CleaningConfig struct {
 	// Параметры ёмкости (требуется хотя бы один)
-	// MinFreeSpace — рекомендуемый основной параметр для большинства случаев использования.
 	MinFreeSpace    *int64   // Минимальное свободное место в байтах (рекомендуется)
 	MaxUsagePercent *float64 // Максимальный процент использования диска (0-100)
 	MaxSize         *int64   // Максимальный размер в байтах (используйте, если информация о диске недоступна)
@@ -23,43 +21,37 @@ type CleaningConfig struct {
 	// без учёта состояния диска (взаимоисключим с MinFreeSpace/MaxUsagePercent/MaxSize)
 	MaxAge *time.Duration
 
-	// ExcludeDirs — имена/шаблоны директорий, которые нужно полностью
+	// MinTriggerSize — если задан вместе с MaxAge, режим "по возрасту" запускается если суммарный
+	// вес target-папки (без учёта ExcludeExtensions/ExcludeDirs) превышает это значение в байтах
+	MinTriggerSize *int64
+
+	// ExcludeDirs — имена директорий, которые нужно полностью
 	// пропускать при сканировании и удалении, на любой глубине дерева
 	ExcludeDirs []string
 
 	// Cписок расширений файлов, которые НИКОГДА не учитываются при сканировании и никогда не удаляются
 	ExcludeExtensions []string
 
-	// excludeExtSet — нормализованный набор расширений для O(1)-проверки.
-	// Строится один раз в setDefaults(), чтобы не гонять по срезу
-	// ExcludeExtensions на каждый файл при сканировании миллионов файлов.
+	// excludeExtSet — нормализованный набор расширений, строится один раз в setDefaults().
 	excludeExtSet map[string]struct{}
 
-	// excludeDirSet — нормализованный набор шаблонов, строится один раз
-	// в setDefaults(), как и excludeExtSet
+	// excludeDirSet — нормализованный набор шаблонов, строится один раз в setDefaults()
 	excludeDirSet map[string]struct{}
 
-	// DryRun — если true, все шаги cleaner'а выполняются как обычно,
-	// но реального os.Remove не происходит. CLI-флаг --dry-run
+	// DryRun — если true, все шаги выполняются, но os.Remove не вызывается.
 	DryRun bool
 
-	// Настройки параллелизма
 	// Concurrency задаёт желаемый уровень параллелизма.
-	// Если значение 0, по умолчанию используется runtime.NumCPU().
 	Concurrency int
 
-	// MaxConcurrency ограничивает максимальный уровень параллелизма.
-	// По умолчанию равен 4, так как тесты производительности показывают убывающую отдачу при превышении этого значения.
-	// Фактический уровень параллелизма будет равен min(Concurrency, MaxConcurrency).
+	// MaxConcurrency ограничивает максимальный уровень параллелизма. По умолчанию равен 4
 	MaxConcurrency int
 
-	// Коллбэки
 	Callbacks Callbacks
 
-	// Внедрение зависимостей
-	// DiskInfo позволяет подставить в тестах поддельный источник DiskUsage/BlockSize
-	// вместо обращения к реальной файловой системе (см. DiskInfoProvider в disk.go).
-	DiskInfo DiskInfoProvider // Если nil, используется реализация по умолчанию
+	// DiskInfo — внедрение зависимости для тестов; если nil, берётся
+	// реализация по умолчанию (см. DiskInfoProvider в disk.go).
+	DiskInfo DiskInfoProvider
 }
 
 // setDefaults устанавливает значения по умолчанию для конфигурации
@@ -92,21 +84,15 @@ func (c *CleaningConfig) setDefaults() {
 		}
 	}
 
-	// Устанавливаем параллелизм по умолчанию равным количеству CPU, если не указано
 	if c.Concurrency == 0 {
 		c.Concurrency = runtime.NumCPU()
 	}
-
-	// Устанавливаем максимальный параллелизм по умолчанию
 	if c.MaxConcurrency == 0 {
 		c.MaxConcurrency = 4
 	}
-
 	if c.DiskInfo == nil {
 		c.DiskInfo = &DefaultDiskInfoProvider{}
 	}
-	// RemoveEmptyDirs по умолчанию true, но мы не можем переопределить явное false
-	// поэтому не устанавливаем его здесь — пусть решает вызывающий код
 }
 
 // ActualWorkerCount возвращает фактическое количество рабочих процессов, которое будет использовано
@@ -129,9 +115,8 @@ func (c *CleaningConfig) isExcluded(path string) bool {
 	return found
 }
 
-// IsExcludedDir isExcludedDir сообщает, нужно ли пропустить директорию целиком (не спускаться внутрь
-// при сканировании/удалении) — сравнение идёт по имени директории (entry.Name()),
-// а не по полному пути, поэтому совпадение срабатывает на любой глубине дерева.
+// IsExcludedDir сообщает, нужно ли пропустить директорию целиком — сравнение идёт
+// по имени директории (entry.Name()), поэтому совпадение срабатывает на любой глубине дерева.
 func (c *CleaningConfig) IsExcludedDir(name string) bool {
 	if len(c.excludeDirSet) == 0 {
 		return false
@@ -147,6 +132,14 @@ func (c *CleaningConfig) validate() error {
 	}
 
 	if c.MaxAge != nil && *c.MaxAge < 0 {
+		return ErrInvalidConfig
+	}
+
+	if c.MinTriggerSize != nil && c.MaxAge == nil {
+		return ErrInvalidConfig
+	}
+
+	if c.MinTriggerSize != nil && *c.MinTriggerSize < 0 {
 		return ErrInvalidConfig
 	}
 
