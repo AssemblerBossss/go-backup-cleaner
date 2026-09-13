@@ -303,8 +303,8 @@ func calculateThresholdForMaxSize(slots []*timeSlot, maxSize int64) (time.Time, 
 	return time.Time{}, 0, 0
 }
 
-// cleanByAge удаляет файлы старше config.MaxAge, без обращения к состоянию диска —
-// используется, когда задан MaxAge вместо MinFreeSpace/MaxUsagePercent/MaxSize.
+// cleanByAge удаляет файлы старше config.MaxAge, используется, когда задан
+// MaxAge вместо MinFreeSpace/MaxUsagePercent/MaxSize.
 func cleanByAge(dirPath string, config CleaningConfig, startTime time.Time) (CleaningReport, error) {
 	blockSize, err := config.DiskInfo.GetBlockSize(dirPath)
 	if err != nil {
@@ -321,7 +321,7 @@ func cleanByAge(dirPath string, config CleaningConfig, startTime time.Time) (Cle
 	var scanDuration time.Duration
 	var scannedFiles int
 
-	if config.MinTriggerSize != nil {
+	if config.MinTriggerSize != nil || config.MinTriggerFileCount != nil {
 		scanStartTime := time.Now()
 		sc := newScanner(&config, blockSize)
 		if err := sc.scan(dirPath); err != nil {
@@ -340,7 +340,10 @@ func cleanByAge(dirPath string, config CleaningConfig, startTime time.Time) (Cle
 			ScanDuration:  scanDuration,
 		})
 
-		if folderSize < *config.MinTriggerSize {
+		sizeTriggered := config.MinTriggerSize != nil && folderSize >= *config.MinTriggerSize
+		countTriggered := config.MinTriggerFileCount != nil && int64(scannedFiles) >= *config.MinTriggerFileCount
+
+		if !sizeTriggered && !countTriggered {
 			return CleaningReport{
 				ScanDuration:  scanDuration,
 				TotalDuration: time.Since(startTime),

@@ -25,6 +25,12 @@ type CleaningConfig struct {
 	// вес target-папки (без учёта ExcludeExtensions/ExcludeDirs) превышает это значение в байтах
 	MinTriggerSize *int64
 
+	// MinTriggerFileCount — если задан вместе с MaxAge, режим "по возрасту" запускается, если
+	// количество файлов в target-папке (без учёта ExcludeExtensions/ExcludeDirs) достигает этого
+	// значения. Комбинируется с MinTriggerSize по ИЛИ: age-удаление запускается, если сработал
+	// хотя бы один из заданных триггеров
+	MinTriggerFileCount *int64
+
 	// ExcludeDirs — имена директорий, которые нужно полностью
 	// пропускать при сканировании и удалении, на любой глубине дерева
 	ExcludeDirs []string
@@ -123,7 +129,7 @@ func (c *CleaningConfig) IsExcludedDir(name string) bool {
 	return found
 }
 
-// validate проверяет, является ли конфигурация допустимой
+// validate для проверки корректности конфигурации
 func (c *CleaningConfig) validate() error {
 	if c.MinFreeSpace == nil && c.MaxUsagePercent == nil && c.MaxSize == nil && c.MaxAge == nil {
 		return ErrNoCapacitySpecified
@@ -138,6 +144,14 @@ func (c *CleaningConfig) validate() error {
 	}
 
 	if c.MinTriggerSize != nil && *c.MinTriggerSize < 0 {
+		return ErrInvalidConfig
+	}
+
+	if c.MinTriggerFileCount != nil && c.MaxAge == nil {
+		return ErrInvalidConfig
+	}
+
+	if c.MinTriggerFileCount != nil && *c.MinTriggerFileCount < 0 {
 		return ErrInvalidConfig
 	}
 
