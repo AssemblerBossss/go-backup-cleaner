@@ -5,28 +5,52 @@ max_concurrency: 4
 time_window: 5m
 
 targets:
-  # У каждой директории — свои условия очистки и свой список
-  # исключений по расширению.
-  - path: /mnt/backups/site-a
-    min_free_space_gb: 10          # держать не менее 10 ГБ свободными
+  # 1) Режим "свободное место": держать не менее N ГБ свободными на диске.
+  #    Самый распространённый режим для backup-хранилищ.
+  - path: ./backups/db
+    min_free_space_gb: 10
     remove_empty_dirs: true
-    exclude_extensions: [ .lock, .tmp ]   # эти файлы никогда не трогаем
+    exclude_extensions: [.lock, .tmp]
 
-  - path: /mnt/backups/site-b
-    max_usage_percent: 90          # не превышать 90% занятого места
-    exclude_extensions: [ .db ]
+  # 2) Режим "процент использования": чистить, пока занято не станет
+  #    меньше max_usage_percent. Полезно, когда диск общий с другими сервисами.
+  - path: ./backups/media
+    max_usage_percent: 85
+    exclude_dirs: [.git, node_modules]
 
-  - path: /mnt/backups/site-c
-    max_size_gb: 500               # суммарный размер не более 500 ГБ
-    dry_run: true                  # только показать, что было бы удалено
+  # 3) Режим "максимальный размер каталога": не зависит от статистики
+  #    диска (df/statfs) — годится для сетевых томов, где она недоступна.
+  - path: ./backups/logs
+    max_size_gb: 50
+    remove_empty_dirs: false
 
-  - path: /mnt/backups/logs
+  # 4) Режим "по возрасту" (max_age) без триггера — безусловно удаляем
+  #    всё старше указанного срока, независимо от занятого места.
+  #    Поддерживаются time.ParseDuration ("720h") и суффиксы d/w.
+  - path: ./backups/archive
     max_age: 30d
-    exclude_dirs: [ archive, .git ]        # пропускать на любой глубине
-    exclude_extensions: [ .lock, .keep ]
+    exclude_extensions: [.keep]
 
-  - path: /mnt/backups/big-archive
-    max_age: 30d
-    age_trigger_size_gb: 30   # удалять файлы старше 30d, только если папка весит больше 30 ГБ
-    exclude_extensions: [ .lock ]
+  # 5) Режим "по возрасту" с триггером по размеру (age_trigger_size_gb):
+  #    удаление старше max_age запускается, только если сам каталог
+  #    весит больше порога — иначе target пропускается целиком.
+  - path: ./backups/snapshots
+    max_age: 4w
+    age_trigger_size_gb: 20
+    remove_empty_dirs: true
 
+  # 6) Свой time_window (переопределяет глобальный) + dry_run: true —
+  #    ничего не удаляется физически, только логируется, что было бы удалено.
+  #    Удобно для первого прогона на новом target.
+  - path: ./backups/staging
+    max_age: 12h
+    time_window: 1m
+    dry_run: true
+    exclude_dirs: [tmp]
+    exclude_extensions: [.part, .tmp]
+
+  # 7) Минимальный вариант: только обязательное поле ёмкости (max_age),
+  #    все остальные настройки — дефолты библиотеки
+  #    (remove_empty_dirs: true, time_window глобальный, dry_run: false).
+  - path: ./backups/minimal
+    max_age: 90d
