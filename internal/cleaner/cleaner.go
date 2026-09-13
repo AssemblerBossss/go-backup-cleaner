@@ -15,16 +15,16 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 		return CleaningReport{}, err
 	}
 
-	if config.MaxAge != nil {
-		return cleanByAge(dirPath, config, startTime)
-	}
-
 	// Проверяем, существует ли директория
 	if _, err := os.Stat(dirPath); err != nil {
 		if os.IsNotExist(err) {
 			return CleaningReport{}, ErrDirectoryNotFound
 		}
 		return CleaningReport{}, err
+	}
+
+	if config.MaxAge != nil {
+		return cleanByAge(dirPath, config, startTime)
 	}
 
 	// Получаем текущее использование диска
@@ -45,8 +45,6 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 	if diskUsageError != nil && config.MaxSize != nil {
 		// Особый случай: не удалось получить данные об использовании диска, но указан MaxSize.
 		// В этом случае мы просканируем все файлы и будем удалять, пока общий размер не станет меньше MaxSize.
-		// Это позволяет cleaner'у работать в окружениях, где API получения информации о диске недоступен
-		// (например, из-за ограниченных прав доступа, сетевого хранилища и т.д.)
 		targetSize = -1 // Специальное значение, означающее "сканировать и удалять, пока размер не станет меньше MaxSize"
 	} else {
 		targetSize = calculateTargetSize(currentUsage, &config)
@@ -58,13 +56,11 @@ func CleanBackup(dirPath string, config CleaningConfig) (CleaningReport, error) 
 		}
 	}
 
-	// Получаем размер блока
 	blockSize, err := config.DiskInfo.GetBlockSize(dirPath)
 	if err != nil {
 		return CleaningReport{}, err
 	}
 
-	// Вызываем коллбэк OnStart
 	if currentUsage != nil || targetSize == -1 {
 		var usage DiskUsage
 		if currentUsage != nil {
