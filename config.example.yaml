@@ -39,6 +39,20 @@ targets:
     age_trigger_size_gb: 20
     remove_empty_dirs: true
 
+  # 5b) Режим "по возрасту" с триггером по количеству файлов
+  #     (age_trigger_file_count): удаление старше max_age запускается,
+  #     только если файлов в каталоге не меньше порога.
+  - path: ./backups/uploads
+    max_age: 30d
+    age_trigger_file_count: 10000
+
+  # 5c) Оба триггера сразу: запустится, если папка тяжелее 20 ГБ
+  #     ИЛИ в ней 10000+ файлов — что наступит раньше.
+  - path: ./backups/mixed
+    max_age: 14d
+    age_trigger_size_gb: 20
+    age_trigger_file_count: 10000
+
   # 6) Свой time_window (переопределяет глобальный) + dry_run: true —
   #    ничего не удаляется физически, только логируется, что было бы удалено.
   #    Удобно для первого прогона на новом target.

@@ -37,8 +37,9 @@ type yamlTarget struct {
 	RemoveEmptyDirs *bool  `yaml:"remove_empty_dirs"` // *bool, чтобы отличить "не указано" от false
 	DryRun          bool   `yaml:"dry_run"`
 
-	MaxAge           string   `yaml:"max_age"`             // "720h", "30d", "4w" — взаимоисключимо с capacity-полями выше
-	AgeTriggerSizeGB *float64 `yaml:"age_trigger_size_gb"` // запускать max_age, только если папка весит больше этого
+	MaxAge              string   `yaml:"max_age"`                // "720h", "30d", "4w" — взаимоисключимо с capacity-полями выше
+	AgeTriggerSizeGB    *float64 `yaml:"age_trigger_size_gb"`    // запускать max_age, только если папка весит больше этого
+	AgeTriggerFileCount *int64   `yaml:"age_trigger_file_count"` // запускать max_age, только если файлов в папке не меньше этого
 
 	ExcludeDirs       []string `yaml:"exclude_dirs"`       // имена директорий, пропускаются на любой глубине
 	ExcludeExtensions []string `yaml:"exclude_extensions"` // расширения файлов, никогда не трогаются
@@ -167,6 +168,10 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 			errs = append(errs, fmt.Errorf("targets[%d] (%s): age_trigger_size_gb имеет смысл только вместе с max_age", i, t.Path))
 		}
 
+		if t.AgeTriggerFileCount != nil && t.MaxAge == "" {
+			errs = append(errs, fmt.Errorf("targets[%d] (%s): age_trigger_file_count имеет смысл только вместе с max_age", i, t.Path))
+		}
+
 		conf := cleaner.CleaningConfig{
 			MaxUsagePercent:   t.MaxUsagePercent,
 			MaxAge:            maxAge,
@@ -191,6 +196,9 @@ func buildTargets(cfg *yamlConfig) ([]resolvedTarget, []error) {
 		if t.AgeTriggerSizeGB != nil {
 			bytes := int64(*t.AgeTriggerSizeGB * 1024 * 1024 * 1024)
 			conf.MinTriggerSize = &bytes
+		}
+		if t.AgeTriggerFileCount != nil {
+			conf.MinTriggerFileCount = t.AgeTriggerFileCount
 		}
 
 		if conf.MinFreeSpace == nil && conf.MaxUsagePercent == nil && conf.MaxSize == nil && conf.MaxAge == nil {
