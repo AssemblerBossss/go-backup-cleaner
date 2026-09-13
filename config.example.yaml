@@ -68,3 +68,25 @@ targets:
   #    (remove_empty_dirs: true, time_window глобальный, dry_run: false).
   - path: ./backups/minimal
     max_age: 90d
+
+
+  # Локальный диск, одинарные кавычки — обратный слэш не экранируется.
+#  - path: 'D:\backups\media'
+#    max_usage_percent: 85
+#    exclude_dirs: [.git, node_modules]
+#
+#  # Локальный диск, двойные кавычки — обратный слэш экранирован (\\).
+#  - path: "E:\\backups\\logs"
+#    max_size_gb: 50
+#
+#  # Путь с пробелом — кавычки обязательны в любом из вариантов.
+#  - path: "C:/Program Files/Backups/archive"
+#    max_age: 30d
+#
+#  # Сетевой путь (UNC), прямые слэши.
+#  - path: //fileserver/share/backups
+#    max_age: 14d
+#
+#  # Сетевой путь (UNC), одинарные кавычки с бэкслэшами.
+#  - path: '\\fileserver\share\backups'
+#    max_age: 14d
