@@ -25,7 +25,7 @@ go build -o backup-cleaner ./cmd/backup-cleaner
 
 ## Параметры конфигурации (`CleaningConfig`)
 
-Ниже — поля внутреннего `cleaner.CleaningConfig` (`internal/cleaner`), в которые CLI транслирует YAML-конфиг (см. `cmd/backup-cleaner/config.go` и пример в `config.yaml`).
+Ниже — поля внутреннего `cleaner.CleaningConfig` (`internal/cleaner`), в которые CLI транслирует YAML-конфиг (см. `cmd/backup-cleaner/config.go` и пример в `config.example.yaml`).
 
 ### Режим ограничения (обязателен ровно один из вариантов)
 
@@ -41,6 +41,7 @@ go build -o backup-cleaner ./cmd/backup-cleaner
 - `TimeWindow` — интервал агрегации файлов по времени (по умолчанию 5 минут)
 - `RemoveEmptyDirs` — удалять опустевшие директории (по умолчанию `true`)
 - `MinTriggerSize` (*int64, байты) — только вместе с `MaxAge`: запускать удаление по возрасту, лишь если суммарный размер директории превышает это значение
+- `MinTriggerFileCount` (*int64) — только вместе с `MaxAge`: запускать удаление по возрасту, лишь если количество файлов в директории достигает этого значения. Если заданы оба триггера (`MinTriggerSize` и `MinTriggerFileCount`), они комбинируются по ИЛИ — достаточно сработать любому одному
 - `ExcludeDirs` — имена директорий, полностью пропускаемые на любой глубине дерева
 - `ExcludeExtensions` — расширения файлов, которые никогда не сканируются и не удаляются
 - `DryRun` — выполнить все шаги, но не удалять файлы физически
@@ -82,7 +83,13 @@ go test -v -cover ./...
 
 ## CLI
 
-Запуск по YAML-конфигу (пример конфига со всеми режимами — `config.yaml`):
+Скопировать пример конфига со всеми режимами (`config.example.yaml`) и отредактировать под свои пути:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Запуск по YAML-конфигу:
 
 ```bash
 ./backup-cleaner -config config.yaml -verbose
@@ -94,7 +101,7 @@ go test -v -cover ./...
 ./backup-cleaner -config config.yaml -dry-run -verbose
 ```
 
-Каждый target в YAML-конфиге — независимая директория со своим набором правил (см. комментарии в `config.yaml`).
+Каждый target в YAML-конфиге — независимая директория со своим набором правил (см. комментарии в `config.example.yaml`).
 
 ## Лицензия
 
