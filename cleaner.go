@@ -318,6 +318,39 @@ func cleanByAge(dirPath string, config CleaningConfig, startTime time.Time) (Cle
 		// CurrentUsage не заполняется — в age-режиме состояние диска не опрашивается
 	})
 
+	var scanDuration time.Duration
+	var scannedFiles int
+
+	if config.MinTriggerSize != nil {
+		scanStartTime := time.Now()
+		sc := newScanner(&config, blockSize)
+		if err := sc.scan(dirPath); err != nil {
+			return CleaningReport{}, err
+		}
+		slots := sc.getTimeSlots()
+		folderSize := getTotalSize(slots)
+		scannedFiles = sc.getTotalFiles()
+		scanDuration = time.Since(scanStartTime)
+
+		callSafe(config.Callbacks.OnScanComplete, ScanCompleteInfo{
+			ScannedFiles:  scannedFiles,
+			TotalSize:     folderSize,
+			BlockSize:     blockSize,
+			TimeThreshold: threshold,
+			ScanDuration:  scanDuration,
+		})
+
+		if folderSize < *config.MinTriggerSize {
+			return CleaningReport{
+				ScanDuration:  scanDuration,
+				TotalDuration: time.Since(startTime),
+				ScannedFiles:  scannedFiles,
+				TimeThreshold: threshold,
+				BlockSize:     blockSize,
+			}, nil
+		}
+	}
+
 	deleteStartTime := time.Now()
 	d := newDeleter(&config, blockSize)
 	if err := d.deleteFiles(dirPath, threshold); err != nil {
@@ -341,10 +374,11 @@ func cleanByAge(dirPath string, config CleaningConfig, startTime time.Time) (Cle
 		DeletedSize:      deletedSize,
 		DeletedBlockSize: deletedBlocks,
 		DeletedDirs:      deletedDirs,
+		ScanDuration:     scanDuration,
 		DeleteDuration:   deleteDuration,
 		TotalDuration:    time.Since(startTime),
+		ScannedFiles:     scannedFiles,
 		TimeThreshold:    threshold,
 		BlockSize:        blockSize,
-		// ScanDuration/ScannedFiles остаются нулевыми — фазы сканирования нет
 	}, nil
 }
