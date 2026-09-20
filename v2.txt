@@ -1,0 +1,788 @@
+v2: клиент для отправки списка удалённых файлов на URL
+
+Что делает: после очистки каждого target собирает список удалённых файлов
+(через существующий коллбэк OnFileDeleted) и шлёт его HTTP-запросом на
+заданный url. Исходники проекта этим файлом НЕ менялись — ниже готовый код.
+Проверено: go vet, go test -race ./..., плюс ручной прогон бинаря
+против локального приёмника (2 пакета по batch_size: 2, verbose работает).
+
+Как применить:
+  1. Новые файлы (блоки "FILE" ниже) положить по указанным путям.
+  2. Применить блок "PATCH" (правки config.go, main.go) — вручную или
+     `patch -p0 < patch.diff`, если вырезать блок в файл.
+  3. Дописать блок YAML в config.example.yaml (пример закомментирован).
+  4. go test ./...
+
+Решения (поменять легко, если не так):
+  - Метод: POST по умолчанию, можно PUT/PATCH. GET нельзя — список файлов
+    в query не влезет, а GET с телом нестандартен.
+  - "Параметры": query-параметры (params) + заголовки (headers) в конфиге;
+    сам список — JSON в теле. Токен в query не попадает в логи ошибок.
+  - Формат тела (Payload):
+      {"run_id","host","target","dry_run","sent_at",
+       "batch","batches","total_files",
+       "files":[{"path","size","mod_time"}]}
+  - batch_size: большие списки (10000+ файлов) режутся на пакеты с общим
+    run_id и номерами batch/batches. 0 — всё одним запросом.
+  - Повторы (retries): при сетевой ошибке / 5xx / 429 / 408, пауза 1s, 2s, 4s...
+    4xx не повторяется. Первый упавший пакет останавливает отправку.
+  - Отправка идёт и при ошибке очистки (часть файлов уже удалена).
+  - Ошибка отправки НЕ откатывает очистку: пишется в лог, exit code = 1.
+  - dry-run: запрос уходит с "dry_run": true — приёмник отличит прогноз
+    от реального удаления. Если не нужно — обернуть Send в `if !DryRun`.
+  - Пустой список — запрос не отправляется.
+  - Блок notify глобальный (один URL на все targets), поле target в теле
+    говорит, какая директория чистилась.
+  - Порядок в main.go важен: collector.Attach ПОСЛЕ attachVerboseCallbacks
+    (тот перезаписывает Callbacks целиком; Attach оборачивает прежний).
+
+==============================================================================
+=== internal/notify/notify.go
+=== клиент + сборщик удалённых файлов
+==============================================================================
+// Package notify отправляет HTTP-запросом на заданный URL список файлов,
+// удалённых при очистке.
+package notify
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/ideamans/go-backup-cleaner/internal/cleaner"
+)
+
+const (
+	defaultTimeout = 10 * time.Second
+	defaultBackoff = time.Second
+)
+
+// Config описывает, куда и как отправлять список удалённых файлов.
+type Config struct {
+	URL       string            // http:// или https:// адрес приёмника (обязательно)
+	Method    string            // POST (по умолчанию), PUT или PATCH — GET не подходит, у него нет тела
+	Params    map[string]string // query-параметры, добавляются к URL (?token=...&env=...)
+	Headers   map[string]string // дополнительные заголовки (например, Authorization)
+	Timeout   time.Duration     // таймаут одного HTTP-запроса; 0 — 10s
+	Retries   int               // сколько раз повторять при сетевой ошибке / 5xx / 429; 0 — не повторять
+	BatchSize int               // максимум файлов в одном запросе; 0 — всё одним запросом
+}
+
+// DeletedFile — одна запись списка удалённых файлов.
+type DeletedFile struct {
+	Path    string    `json:"path"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mod_time"`
+}
+
+// Payload — тело запроса. Если список не влез в один пакет (BatchSize),
+// уходит несколько запросов с одинаковым RunID и нарастающим Batch.
+type Payload struct {
+	RunID      string        `json:"run_id"`      // общий для всех пакетов одной отправки
+	Host       string        `json:"host"`        // os.Hostname()
+	Target     string        `json:"target"`      // очищаемая директория
+	DryRun     bool          `json:"dry_run"`     // true — файлы НЕ удалены, это только прогноз
+	SentAt     time.Time     `json:"sent_at"`     // UTC
+	Batch      int           `json:"batch"`       // номер пакета, с 1
+	Batches    int           `json:"batches"`     // всего пакетов
+	TotalFiles int           `json:"total_files"` // всего файлов во всех пакетах
+	Files      []DeletedFile `json:"files"`
+}
+
+// Client отправляет Payload на настроенный URL.
+type Client struct {
+	cfg      Config
+	method   string
+	endpoint string // URL уже с query-параметрами
+	host     string
+	http     *http.Client
+	backoff  time.Duration // базовая пауза между повторами, удваивается
+}
+
+// New проверяет конфиг и создаёт клиента.
+func New(cfg Config) (*Client, error) {
+	u, err := url.Parse(cfg.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("notify: некорректный url (нужен http:// или https://)")
+	}
+
+	method := strings.ToUpper(cfg.Method)
+	if method == "" {
+		method = http.MethodPost
+	}
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+	default:
+		return nil, fmt.Errorf("notify: метод %q не поддерживается (POST, PUT, PATCH)", cfg.Method)
+	}
+
+	if cfg.Retries < 0 {
+		return nil, fmt.Errorf("notify: retries не может быть отрицательным")
+	}
+	if cfg.BatchSize < 0 {
+		return nil, fmt.Errorf("notify: batch_size не может быть отрицательным")
+	}
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+
+	q := u.Query()
+	for k, v := range cfg.Params {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+
+	host, _ := os.Hostname()
+
+	return &Client{
+		cfg:      cfg,
+		method:   method,
+		endpoint: u.String(),
+		host:     host,
+		http:     &http.Client{Timeout: timeout},
+		backoff:  defaultBackoff,
+	}, nil
+}
+
+// Send отправляет files пакетами по BatchSize. Пустой список — запроса нет.
+// На первой неудаче останавливается и возвращает ошибку: остальные пакеты
+// не отправляются, чтобы приёмник не получил "дыру" в середине списка.
+func (c *Client) Send(ctx context.Context, target string, dryRun bool, files []DeletedFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+
+	size := c.cfg.BatchSize
+	if size <= 0 {
+		size = len(files)
+	}
+	batches := (len(files) + size - 1) / size
+	runID := newRunID()
+
+	for i := 0; i < batches; i++ {
+		lo := i * size
+		hi := min(lo+size, len(files))
+
+		body, err := json.Marshal(Payload{
+			RunID:      runID,
+			Host:       c.host,
+			Target:     target,
+			DryRun:     dryRun,
+			SentAt:     time.Now().UTC(),
+			Batch:      i + 1,
+			Batches:    batches,
+			TotalFiles: len(files),
+			Files:      files[lo:hi],
+		})
+		if err != nil {
+			return fmt.Errorf("notify: сериализация пакета %d/%d: %w", i+1, batches, err)
+		}
+
+		if err := c.post(ctx, body); err != nil {
+			return fmt.Errorf("notify: пакет %d/%d: %w", i+1, batches, err)
+		}
+	}
+	return nil
+}
+
+// post отправляет body с повторами и экспоненциальной паузой.
+func (c *Client) post(ctx context.Context, body []byte) error {
+	var lastErr error
+	for attempt := 0; attempt <= c.cfg.Retries; attempt++ {
+		if attempt > 0 {
+			delay := c.backoff << (attempt - 1)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		retry, err := c.doOnce(ctx, body)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retry {
+			return err
+		}
+	}
+	return fmt.Errorf("после %d попыток: %w", c.cfg.Retries+1, lastErr)
+}
+
+// doOnce делает один HTTP-запрос. Первое значение — имеет ли смысл повторять.
+func (c *Client) doOnce(ctx context.Context, body []byte) (retry bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, c.method, c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return false, redactURL(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "go-backup-cleaner")
+	for k, v := range c.cfg.Headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return true, redactURL(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return false, nil
+	}
+
+	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	err = fmt.Errorf("сервер ответил %s: %s", resp.Status, strings.TrimSpace(string(snippet)))
+	retry = resp.StatusCode >= 500 ||
+		resp.StatusCode == http.StatusTooManyRequests ||
+		resp.StatusCode == http.StatusRequestTimeout
+	return retry, err
+}
+
+// redactURL убирает URL из *url.Error: в нём лежат query-параметры, а там
+// обычно токен, и он не должен попадать в логи.
+func redactURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
+func newRunID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return time.Now().UTC().Format("20060102T150405Z")
+	}
+	return hex.EncodeToString(b)
+}
+
+// Collector копит удалённые файлы через коллбэк OnFileDeleted.
+// Коллбэк зовётся из нескольких горутин-воркеров, поэтому доступ под мьютексом.
+type Collector struct {
+	mu    sync.Mutex
+	files []DeletedFile
+}
+
+func NewCollector() *Collector {
+	return &Collector{}
+}
+
+// Attach вешает сбор на cfg. Уже установленный OnFileDeleted (например,
+// verbose-вывод) сохраняется и вызывается первым, так что Attach нужно
+// звать ПОСЛЕ того, как Callbacks заданы окончательно.
+func (c *Collector) Attach(cfg *cleaner.CleaningConfig) {
+	prev := cfg.Callbacks.OnFileDeleted
+	cfg.Callbacks.OnFileDeleted = func(info cleaner.FileDeletedInfo) {
+		if prev != nil {
+			prev(info)
+		}
+		c.mu.Lock()
+		c.files = append(c.files, DeletedFile{
+			Path:    info.Path,
+			Size:    info.Size,
+			ModTime: info.ModTime,
+		})
+		c.mu.Unlock()
+	}
+}
+
+// Files возвращает копию собранного списка.
+func (c *Collector) Files() []DeletedFile {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]DeletedFile(nil), c.files...)
+}
+
+==============================================================================
+=== internal/notify/notify_test.go
+=== тесты (httptest, без сети)
+==============================================================================
+package notify
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/ideamans/go-backup-cleaner/internal/cleaner"
+)
+
+func sampleFiles(n int) []DeletedFile {
+	files := make([]DeletedFile, n)
+	for i := range files {
+		files[i] = DeletedFile{
+			Path:    "/data/f" + string(rune('a'+i)),
+			Size:    int64(100 * (i + 1)),
+			ModTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		}
+	}
+	return files
+}
+
+func newTestClient(t *testing.T, cfg Config) *Client {
+	t.Helper()
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c.backoff = time.Millisecond
+	return c
+}
+
+func TestSend_PostsJSONWithParamsAndHeaders(t *testing.T) {
+	var got Payload
+	var gotReq *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReq = r
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{
+		URL:     srv.URL + "/api/deleted?keep=1",
+		Params:  map[string]string{"token": "secret", "env": "prod"},
+		Headers: map[string]string{"Authorization": "Bearer xyz"},
+	})
+
+	files := sampleFiles(2)
+	if err := c.Send(context.Background(), "/data", false, files); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if gotReq.Method != http.MethodPost {
+		t.Errorf("method = %s, want POST", gotReq.Method)
+	}
+	if gotReq.URL.Path != "/api/deleted" {
+		t.Errorf("path = %s", gotReq.URL.Path)
+	}
+	q := gotReq.URL.Query()
+	if q.Get("token") != "secret" || q.Get("env") != "prod" || q.Get("keep") != "1" {
+		t.Errorf("query = %v", q)
+	}
+	if gotReq.Header.Get("Authorization") != "Bearer xyz" {
+		t.Errorf("Authorization = %q", gotReq.Header.Get("Authorization"))
+	}
+	if gotReq.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q", gotReq.Header.Get("Content-Type"))
+	}
+
+	if got.Target != "/data" || got.DryRun || got.Batch != 1 || got.Batches != 1 || got.TotalFiles != 2 {
+		t.Errorf("payload meta = %+v", got)
+	}
+	if len(got.Files) != 2 || got.Files[1].Path != files[1].Path || got.Files[1].Size != 200 {
+		t.Errorf("files = %+v", got.Files)
+	}
+	if got.RunID == "" {
+		t.Error("run_id пустой")
+	}
+}
+
+func TestSend_CustomMethodAndDryRun(t *testing.T) {
+	var method string
+	var dry bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		var p Payload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		dry = p.DryRun
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL, Method: "put"})
+	if err := c.Send(context.Background(), "/data", true, sampleFiles(1)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if method != http.MethodPut {
+		t.Errorf("method = %s, want PUT", method)
+	}
+	if !dry {
+		t.Error("dry_run не передан")
+	}
+}
+
+func TestSend_SplitsIntoBatches(t *testing.T) {
+	var mu sync.Mutex
+	var payloads []Payload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p Payload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		payloads = append(payloads, p)
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL, BatchSize: 2})
+	if err := c.Send(context.Background(), "/data", false, sampleFiles(5)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if len(payloads) != 3 {
+		t.Fatalf("запросов = %d, want 3", len(payloads))
+	}
+	wantLens := []int{2, 2, 1}
+	for i, p := range payloads {
+		if p.Batch != i+1 || p.Batches != 3 || p.TotalFiles != 5 || len(p.Files) != wantLens[i] {
+			t.Errorf("batch %d = batch:%d/%d total:%d files:%d", i, p.Batch, p.Batches, p.TotalFiles, len(p.Files))
+		}
+		if p.RunID != payloads[0].RunID {
+			t.Errorf("run_id разный: %q vs %q", p.RunID, payloads[0].RunID)
+		}
+	}
+}
+
+func TestSend_EmptyListMakesNoRequest(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL})
+	if err := c.Send(context.Background(), "/data", false, nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("запросов = %d, want 0", calls)
+	}
+}
+
+func TestSend_RetriesOn5xx(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL, Retries: 2})
+	if err := c.Send(context.Background(), "/data", false, sampleFiles(1)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("запросов = %d, want 2", calls)
+	}
+}
+
+func TestSend_GivesUpAfterRetries(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		http.Error(w, "still down", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL, Retries: 2})
+	err := c.Send(context.Background(), "/data", false, sampleFiles(1))
+	if err == nil {
+		t.Fatal("ожидалась ошибка")
+	}
+	if calls != 3 {
+		t.Errorf("запросов = %d, want 3 (1 + 2 повтора)", calls)
+	}
+	if !strings.Contains(err.Error(), "503") || !strings.Contains(err.Error(), "still down") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestSend_NoRetryOn4xx(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		http.Error(w, "bad token", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL, Retries: 3})
+	if err := c.Send(context.Background(), "/data", false, sampleFiles(1)); err == nil {
+		t.Fatal("ожидалась ошибка")
+	}
+	if calls != 1 {
+		t.Errorf("запросов = %d, want 1", calls)
+	}
+}
+
+func TestSend_StopsAfterFailedBatch(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 2 {
+			http.Error(w, "nope", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, Config{URL: srv.URL, BatchSize: 1})
+	err := c.Send(context.Background(), "/data", false, sampleFiles(4))
+	if err == nil || !strings.Contains(err.Error(), "пакет 2/4") {
+		t.Fatalf("err = %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("запросов = %d, want 2", calls)
+	}
+}
+
+func TestSend_ErrorDoesNotLeakQueryParams(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close() // порт закрыт — будет connection refused
+
+	c := newTestClient(t, Config{URL: url, Params: map[string]string{"token": "supersecret"}})
+	err := c.Send(context.Background(), "/data", false, sampleFiles(1))
+	if err == nil {
+		t.Fatal("ожидалась ошибка")
+	}
+	if strings.Contains(err.Error(), "supersecret") {
+		t.Errorf("токен утёк в ошибку: %v", err)
+	}
+}
+
+func TestSend_ContextCancelStopsRetries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c := newTestClient(t, Config{URL: srv.URL, Retries: 5})
+	c.backoff = time.Hour // если отмена не сработает, тест повиснет
+	if err := c.Send(ctx, "/data", false, sampleFiles(1)); err == nil {
+		t.Fatal("ожидалась ошибка")
+	}
+}
+
+func TestNew_Validation(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		ok   bool
+	}{
+		{"минимальный", Config{URL: "https://example.com/x"}, true},
+		{"PATCH", Config{URL: "http://example.com", Method: "PATCH"}, true},
+		{"пустой url", Config{}, false},
+		{"без схемы", Config{URL: "example.com/x"}, false},
+		{"ftp", Config{URL: "ftp://example.com"}, false},
+		{"GET нельзя", Config{URL: "http://example.com", Method: "GET"}, false},
+		{"retries < 0", Config{URL: "http://example.com", Retries: -1}, false},
+		{"batch_size < 0", Config{URL: "http://example.com", BatchSize: -1}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(tt.cfg)
+			if (err == nil) != tt.ok {
+				t.Errorf("err = %v, ok want %v", err, tt.ok)
+			}
+		})
+	}
+}
+
+func TestCollector_ChainsPreviousCallback(t *testing.T) {
+	var prevCalls int
+	cfg := cleaner.CleaningConfig{}
+	cfg.Callbacks.OnFileDeleted = func(cleaner.FileDeletedInfo) { prevCalls++ }
+
+	col := NewCollector()
+	col.Attach(&cfg)
+
+	mod := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	cfg.Callbacks.OnFileDeleted(cleaner.FileDeletedInfo{Path: "/a", Size: 10, ModTime: mod})
+
+	if prevCalls != 1 {
+		t.Errorf("прежний коллбэк вызван %d раз, want 1", prevCalls)
+	}
+	files := col.Files()
+	if len(files) != 1 || files[0].Path != "/a" || files[0].Size != 10 || !files[0].ModTime.Equal(mod) {
+		t.Errorf("files = %+v", files)
+	}
+}
+
+func TestCollector_ConcurrentAndCopy(t *testing.T) {
+	cfg := cleaner.CleaningConfig{}
+	col := NewCollector()
+	col.Attach(&cfg)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg.Callbacks.OnFileDeleted(cleaner.FileDeletedInfo{Path: "/x"})
+		}()
+	}
+	wg.Wait()
+
+	files := col.Files()
+	if len(files) != 50 {
+		t.Fatalf("собрано %d, want 50", len(files))
+	}
+	files[0].Path = "changed"
+	if col.Files()[0].Path == "changed" {
+		t.Error("Files() отдаёт внутренний слайс, а не копию")
+	}
+}
+
+==============================================================================
+=== cmd/backup-cleaner/notify.go
+=== YAML-блок notify и сборка клиента
+==============================================================================
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/ideamans/go-backup-cleaner/internal/notify"
+)
+
+// yamlNotify — необязательный глобальный блок notify: после очистки каждого
+// target список удалённых файлов отправляется HTTP-запросом на url.
+type yamlNotify struct {
+	URL       string            `yaml:"url"`
+	Method    string            `yaml:"method"`     // POST (по умолчанию), PUT, PATCH
+	Params    map[string]string `yaml:"params"`     // query-параметры
+	Headers   map[string]string `yaml:"headers"`    // например, Authorization
+	Timeout   string            `yaml:"timeout"`    // "10s", парсим через time.ParseDuration
+	Retries   int               `yaml:"retries"`    // повторы при сетевой ошибке / 5xx / 429
+	BatchSize int               `yaml:"batch_size"` // файлов на запрос; 0 — всё одним запросом
+}
+
+// buildNotifier создаёт клиента по YAML-блоку. Если блока нет — возвращает nil, nil.
+func buildNotifier(n *yamlNotify) (*notify.Client, error) {
+	if n == nil {
+		return nil, nil
+	}
+
+	var timeout time.Duration
+	if n.Timeout != "" {
+		d, err := time.ParseDuration(n.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("notify.timeout %q: %w", n.Timeout, err)
+		}
+		timeout = d
+	}
+
+	return notify.New(notify.Config{
+		URL:       n.URL,
+		Method:    n.Method,
+		Params:    n.Params,
+		Headers:   n.Headers,
+		Timeout:   timeout,
+		Retries:   n.Retries,
+		BatchSize: n.BatchSize,
+	})
+}
+
+==============================================================================
+=== PATCH: cmd/backup-cleaner/config.go, main.go
+=== unified diff, применять из корня репо (patch -p1)
+==============================================================================
+--- a/cmd/backup-cleaner/config.go
++++ b/cmd/backup-cleaner/config.go
+@@ -21,6 +21,7 @@
+ 	Concurrency    int          `yaml:"concurrency"`
+ 	MaxConcurrency int          `yaml:"max_concurrency"`
+ 	TimeWindow     string       `yaml:"time_window"` // строка вида "5m", парсим через time.ParseDuration
++	Notify         *yamlNotify  `yaml:"notify"`      // необязательно: отправка списка удалённых файлов по HTTP
+ 	Targets        []yamlTarget `yaml:"targets"`
+ }
+ 
+--- a/cmd/backup-cleaner/main.go
++++ b/cmd/backup-cleaner/main.go
+@@ -1,12 +1,14 @@
+ package main
+ 
+ import (
++	"context"
+ 	"flag"
+ 	"fmt"
+ 	"log"
+ 	"os"
+ 
+ 	"github.com/ideamans/go-backup-cleaner/internal/cleaner"
++	"github.com/ideamans/go-backup-cleaner/internal/notify"
+ )
+ 
+ func main() {
+@@ -33,6 +35,11 @@
+ 		log.Fatal("не осталось ни одного валидного target для очистки")
+ 	}
+ 
++	notifier, err := buildNotifier(cfg.Notify)
++	if err != nil {
++		log.Fatal(err)
++	}
++
+ 	var totalFiles, totalDirs int
+ 	var totalSize int64
+ 	exitCode := 0
+@@ -46,8 +53,25 @@
+ 			attachVerboseCallbacks(&target.Config, target.Path)
+ 		}
+ 
++		// Attach — строго после attachVerboseCallbacks: тот перезаписывает
++		// Callbacks целиком, а Attach оборачивает уже установленный OnFileDeleted.
++		var collector *notify.Collector
++		if notifier != nil {
++			collector = notify.NewCollector()
++			collector.Attach(&target.Config)
++		}
++
+ 		fmt.Printf("=== %s ===\n", target.Path)
+ 		report, err := cleaner.CleanBackup(target.Path, target.Config)
++
++		// Отправляем и при ошибке очистки: часть файлов к этому моменту уже удалена.
++		if collector != nil {
++			if serr := notifier.Send(context.Background(), target.Path, target.Config.DryRun, collector.Files()); serr != nil {
++				log.Printf("отправка списка удалённых файлов для %s: %v", target.Path, serr)
++				exitCode = 1
++			}
++		}
++
+ 		if err != nil {
+ 			log.Printf("ошибка очистки %s: %v", target.Path, err)
+ 			exitCode = 1
+
+==============================================================================
+=== PATCH: config.example.yaml
+=== дописать в конец файла
+==============================================================================
+#    max_age: 14d
+# Необязательно: после очистки каждого target отправить список удалённых
+# файлов HTTP-запросом (JSON в теле). Если блока нет — ничего не отправляется.
+# notify:
+#   url: https://example.com/api/deleted
+#   method: POST                 # POST (по умолчанию), PUT, PATCH
+#   params:                      # query-параметры: ?token=...&env=prod
+#     token: change-me
+#     env: prod
+#   headers:
+#     Authorization: Bearer change-me
+#   timeout: 10s
+#   retries: 3                   # повторы при сетевой ошибке / 5xx / 429
+#   batch_size: 1000             # файлов на запрос; 0 — всё одним запросом
