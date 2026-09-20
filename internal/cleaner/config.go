@@ -121,11 +121,12 @@ func (c *CleaningConfig) isExcluded(path string) bool {
 
 // IsExcludedDir сообщает, нужно ли пропустить директорию целиком — сравнение идёт
 // по имени директории (entry.Name()), поэтому совпадение срабатывает на любой глубине дерева.
+// Регистр не учитывается: excludeDirSet хранит имена в нижнем регистре (см. setDefaults).
 func (c *CleaningConfig) IsExcludedDir(name string) bool {
 	if len(c.excludeDirSet) == 0 {
 		return false
 	}
-	_, found := c.excludeDirSet[name]
+	_, found := c.excludeDirSet[strings.ToLower(name)]
 	return found
 }
 
